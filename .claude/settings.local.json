@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_audio_source.py -v)",
+      "Bash(where python:*)",
+      "Bash(C:Users016178AppDataLocalProgramsPythonPython310python.exe -m pytest tests/test_audio_source.py -v)",
+      "Bash(\"/c/Users/016178/AppData/Local/Programs/Python/Python310/python.exe\" -m pytest --version)",
+      "Bash(\"/c/Users/016178/scoop/apps/python/current/python.exe\" -m pytest --version)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"from app.config import load_config; c = load_config\\(\\); print\\(c[''audio''][''type''], c[''audio''][''esp32_host'']\\)\")",
+      "Bash(python -m pytest tests/test_udp_audio_source.py -v)",
+      "Bash(python -c \":*)",
+      "Bash(python tests/_debug_udp.py)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python main.py --help)",
+      "Bash(python -m pytest tests/test_e2e_udp_streaming.py -v)",
+      "Bash(grep -E \"\\\\.py$|^d\")",
+      "Bash(pip list:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api:*)",
+      "WebSearch",
+      "Bash(uv venv:*)",
+      "Bash(uv python:*)",
+      "Bash(.venv/Scripts/python.exe -m pip install --upgrade pip)",
+      "Bash(uv pip:*)",
+      "Bash(.venv/Scripts/python.exe -c \"import funasr_onnx; print\\(''funasr_onnx OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from funasr_onnx.paraformer_bin import Paraformer; print\\(''Paraformer OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from funasr_onnx.paraformer_bin import Paraformer; print\\(''funasr_onnx OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from funasr_onnx.paraformer_bin import Paraformer; print\\(''OK''\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/ -v)",
+      "Bash(timeout 30 .venv/Scripts/python.exe main.py --udp 192.168.4.1:6000)",
+      "Bash(.venv/Scripts/python.exe -c \":*)",
+      "Bash(.venv/Scripts/python.exe -c:*)",
+      "Bash(find /d/MVP/vovotyoe/vocotype -maxdepth 2 -name *.md -o -name *.txt -o -name config*)",
+      "Bash(./.venv/Scripts/python.exe -c \"import torch; print\\(f''PyTorch {torch.__version__}''\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import kaldi_native_fbank; print\\(''kaldi-native-fbank OK''\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import kaldiio; print\\(''kaldiio OK''\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import soundfile; print\\(''soundfile OK''\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import fireredvad; print\\(''fireredvad OK''\\)\")"
+    ]
+  }
+}

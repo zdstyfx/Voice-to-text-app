@@ -11,12 +11,17 @@ from typing import Any, Dict, Optional
 DEFAULT_CONFIG: Dict[str, Any] = {
     "hotkeys": {"toggle": "f2"},
     "audio": {
+        "type": "microphone",  # "microphone" 或 "udp"
         "sample_rate": 16000,
         "block_ms": 20,
         "device": None,
         # 单次录音的最大大小（字节），默认20MB
         # 达到此限制后将自动停止录音并开始转录
         "max_session_bytes": 20 * 1024 * 1024,
+        # UDP 音频源配置（仅当 type="udp" 时生效）
+        "esp32_host": "192.168.4.1",
+        "esp32_port": 6000,
+        "listen_port": 6000,
     },
     "vad": {
         "start_threshold": 0.02,

@@ -16,6 +16,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from .audio_capture import AudioCapture
+from .audio_source import AudioSource
 from .config import ensure_logging_dir, load_config
 from app.funasr_server import FunASRServer
 
@@ -40,6 +41,7 @@ class TranscriptionWorker:
         self,
         config_path: Optional[str] = None,
         on_result: Optional[Callable[[TranscriptionResult], None]] = None,
+        audio_source: Optional[AudioSource] = None,
     ) -> None:
         self.config = load_config(config_path)
         self.on_result = on_result
@@ -49,11 +51,14 @@ class TranscriptionWorker:
         self._current_session_id: Optional[int] = None
 
         audio_cfg = self.config["audio"]
-        self.audio = AudioCapture(
-            sample_rate=audio_cfg["sample_rate"],
-            block_ms=audio_cfg["block_ms"],
-            device=audio_cfg.get("device"),
-        )
+        if audio_source is not None:
+            self.audio: AudioSource = audio_source
+        else:
+            self.audio = AudioCapture(
+                sample_rate=audio_cfg["sample_rate"],
+                block_ms=audio_cfg["block_ms"],
+                device=audio_cfg.get("device"),
+            )
 
         self.fun_server = FunASRServer()
         init_result = self.fun_server.initialize()

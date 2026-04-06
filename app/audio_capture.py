@@ -10,6 +10,7 @@ from typing import Optional
 import numpy as np
 import sounddevice as sd
 
+from .audio_source import AudioSource
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class AudioCaptureError(RuntimeError):
     """Raised when the audio capture stream cannot be started."""
 
 
-class AudioCapture:
+class AudioCapture(AudioSource):
     """Capture audio frames from the default (or configured) microphone."""
 
     def __init__(
