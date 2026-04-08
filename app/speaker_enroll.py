@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import wave
 
@@ -84,41 +85,192 @@ def _record_from_udp(duration: float, config: dict) -> np.ndarray:
     return np.concatenate(frames)
 
 
+def _record_vad_samples(
+    num_samples: int,
+    sample_rate: int = 16000,
+    device=None,
+    min_duration: float = 1.0,
+    max_duration: float = 10.0,
+) -> list[np.ndarray]:
+    """Record multiple speech samples using VAD auto-detection.
+
+    Listens to microphone, uses FireRedVAD to detect speech start/end,
+    and collects num_samples speech segments.
+    """
+    import collections
+    import queue
+
+    import sounddevice as sd
+
+    from .config import load_config
+    from .vad import VadProcessor
+
+    config = load_config()
+    vad = VadProcessor(config)
+    block_ms = config["audio"].get("block_ms", 20)
+    block_samples = sample_rate * block_ms // 1000
+    min_samples_len = int(min_duration * sample_rate)
+    max_samples_len = int(max_duration * sample_rate)
+
+    samples_collected: list[np.ndarray] = []
+    speech_buffer: list[np.ndarray] = []
+    in_speech = False
+    pre_speech_frames: collections.deque = collections.deque(maxlen=15)
+
+    print(f"\n声纹注册")
+    print("=" * 40)
+    print(f"请说 {num_samples} 段不同的话（每段 {min_duration:.0f}-{max_duration:.0f} 秒）\n")
+
+    audio_queue: queue.Queue = queue.Queue()
+
+    def audio_callback(indata, frames, time_info, status):
+        nonlocal in_speech, speech_buffer
+        if status:
+            logger.debug("Audio callback status: %s", status)
+        frame = indata[:, 0].copy()
+        frame_int16 = (frame * 32768).astype(np.int16)
+        audio_queue.put(frame_int16)
+
+    with sd.InputStream(
+        samplerate=sample_rate,
+        channels=1,
+        blocksize=block_samples,
+        dtype="float32",
+        device=device,
+        callback=audio_callback,
+    ):
+        while len(samples_collected) < num_samples:
+            idx = len(samples_collected) + 1
+            print(f"[{idx}/{num_samples}] 请说话...", end=" ", flush=True)
+
+            in_speech = False
+            speech_buffer = []
+            pre_speech_frames.clear()
+            vad.reset()
+
+            while True:
+                try:
+                    frame = audio_queue.get(timeout=0.5)
+                except Exception:
+                    continue
+
+                pre_speech_frames.append(frame)
+                results = vad.process_frame(frame)
+
+                for result in results:
+                    if result.is_speech_start and not in_speech:
+                        in_speech = True
+                        speech_buffer = list(pre_speech_frames)
+                    if result.is_speech_end and in_speech:
+                        in_speech = False
+                        combined = np.concatenate(speech_buffer)
+                        duration_s = len(combined) / sample_rate
+
+                        if len(combined) < min_samples_len:
+                            print(f"太短 ({duration_s:.1f}s)，请重新说话...", end=" ", flush=True)
+                            speech_buffer = []
+                            continue
+
+                        if len(combined) > max_samples_len:
+                            combined = combined[:max_samples_len]
+                            duration_s = len(combined) / sample_rate
+
+                        samples_collected.append(combined)
+                        print(f"完成 ({duration_s:.1f}s)")
+                        break
+
+                if in_speech:
+                    speech_buffer.append(frame)
+                    # Force-end if too long
+                    total_len = sum(len(f) for f in speech_buffer)
+                    if total_len > max_samples_len:
+                        combined = np.concatenate(speech_buffer)[:max_samples_len]
+                        samples_collected.append(combined)
+                        duration_s = len(combined) / sample_rate
+                        print(f"完成 ({duration_s:.1f}s)")
+                        in_speech = False
+                        break
+
+    return samples_collected
+
+
 def cmd_enroll(args: argparse.Namespace) -> None:
     config = load_config()
     config["speaker"]["enabled"] = True
     proc = SpeakerProcessor(config)
 
+    num_samples = getattr(args, "samples", 3)
+    min_samples = config["speaker"].get("min_enroll_samples", 3)
+    if num_samples < min_samples:
+        logger.error("Need at least %d samples, got --samples %d", min_samples, num_samples)
+        sys.exit(1)
+
     if args.audio:
+        # Single WAV file mode (backward compatible)
         audio = _read_wav(args.audio)
+        embedding = proc.extract_embedding(audio)
+        proc.db.enroll(args.name, embedding)
+        logger.info("Enrolled: %s (1 sample from file)", args.name)
     else:
         source = getattr(args, "source", None)
         if not source:
             print("\n  录制声纹样本:")
-            print("  [1] 电脑麦克风")
+            print("  [1] 电脑麦克风 (VAD自动检测)")
             print("  [2] ESP32 UDP 麦克风")
             choice = input("  选择 1 或 2: ").strip()
             source = "udp" if choice == "2" else "mic"
 
         if source == "udp":
             audio = _record_from_udp(args.duration, config)
+            embedding = proc.extract_embedding(audio)
+            proc.db.enroll(args.name, embedding)
+            logger.info("Enrolled: %s (1 sample from UDP)", args.name)
         else:
-            audio = _record_audio(args.duration)
-
-    min_samples = 16000  # at least 1 second
-    if len(audio) < min_samples:
-        logger.error("Audio too short (%.1fs), need at least 1 second", len(audio) / 16000)
-        sys.exit(1)
-
-    embedding = proc.extract_embedding(audio)
-    proc.db.enroll(args.name, embedding)
-    count = 0
-    for s in proc.db.list_speakers():
-        if s == args.name:
-            count = proc.db._speakers.get(s, proc.db._auto_speakers.get(s, {})).get(
-                "sample_count", 0
+            # VAD-guided multi-sample enrollment
+            audio_samples = _record_vad_samples(
+                num_samples=num_samples,
+                sample_rate=config["audio"]["sample_rate"],
+                device=config["audio"].get("device"),
             )
-    logger.info("Enrolled: %s (%d samples)", args.name, count)
+            embeddings = []
+            for i, audio in enumerate(audio_samples):
+                emb = proc.extract_embedding(audio)
+                embeddings.append(emb)
+                proc.db.enroll(args.name, emb)
+
+            # Show inter-sample similarity
+            if len(embeddings) >= 2:
+                print("\n样本间相似度:")
+                centroid = np.mean(embeddings, axis=0)
+                centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
+                for i, emb in enumerate(embeddings):
+                    emb_norm = emb / (np.linalg.norm(emb) + 1e-8)
+                    sim = float(np.dot(emb_norm, centroid))
+                    print(f"  样本 {i+1}: {sim:.4f}")
+
+            count = proc.db._speakers.get(args.name, {}).get("sample_count", 0)
+            logger.info("Enrolled: %s (%d samples)", args.name, count)
+
+    # --add-whitelist
+    if getattr(args, "add_whitelist", False):
+        import json as _json
+
+        config_path = "config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                file_cfg = _json.load(f)
+        else:
+            file_cfg = {}
+
+        spk_cfg = file_cfg.setdefault("speaker", {})
+        whitelist = spk_cfg.setdefault("whitelist", [])
+        if args.name not in whitelist:
+            whitelist.append(args.name)
+            with open(config_path, "w", encoding="utf-8") as f:
+                _json.dump(file_cfg, f, ensure_ascii=False, indent=2)
+            logger.info("Added '%s' to whitelist in %s", args.name, config_path)
+        else:
+            logger.info("'%s' already in whitelist", args.name)
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -159,6 +311,12 @@ def main() -> None:
     )
     p_enroll.add_argument(
         "--source", choices=["mic", "udp"], help="Audio source: mic (computer) or udp (ESP32)"
+    )
+    p_enroll.add_argument(
+        "--samples", type=int, default=3, help="Number of speech samples to collect (default: 3, min: 3)"
+    )
+    p_enroll.add_argument(
+        "--add-whitelist", action="store_true", help="Add speaker to whitelist in config.json"
     )
     p_enroll.set_defaults(func=cmd_enroll)
 
