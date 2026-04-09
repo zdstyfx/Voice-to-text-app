@@ -1,3 +1,4 @@
+nicegui
 sounddevice==0.5.2
 keyboard==0.13.5
 pyperclip==1.11.0
