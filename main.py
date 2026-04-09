@@ -131,6 +131,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--save-dataset", action="store_true", help="Persist audio/text pairs")
     parser.add_argument("--dataset-dir", default="dataset", help="Dataset output directory")
+    parser.add_argument("--web", action="store_true", help="Launch Web UI instead of CLI")
     return parser.parse_args()
 
 
@@ -145,6 +146,11 @@ def main() -> None:
         level=config["logging"].get("level", "INFO"),
         log_dir=log_dir_abs
     )
+
+    if args.web:
+        from app.web import start_web_ui
+        start_web_ui(config)
+        return
 
     # --udp 快捷参数：跳过菜单直接进转写
     if args.udp:
@@ -205,14 +211,19 @@ def _run_transcription_flow(args, config, audio_source=None) -> None:
                     device=device_index,
                 )
 
-    # 交互式选择录音模式
-    print("\n  选择模式:")
-    print("  [1] F2 热键模式（按 F2 开始/停止录音）")
-    print("  [2] VAD 自动检测模式（持续监听）")
-    mode_choice = input("  输入 1 或 2: ").strip()
-
-    # 交互式选择声纹识别
+    # 交互式选择声纹识别（先选声纹，因为 enroll 模式需要强制 VAD）
     speaker_mode, speaker_processor = _choose_speaker_mode(config)
+
+    if speaker_mode == "enroll":
+        # 实时注册模式强制使用 VAD
+        print("\n  实时注册模式，自动使用 VAD 持续监听")
+        mode_choice = "2"
+    else:
+        # 交互式选择录音模式
+        print("\n  选择模式:")
+        print("  [1] F2 热键模式（按 F2 开始/停止录音）")
+        print("  [2] VAD 自动检测模式（持续监听）")
+        mode_choice = input("  输入 1 或 2: ").strip()
 
     if mode_choice == "2":
         _run_vad_mode(args, config, output_method, append_newline, audio_source,
@@ -241,9 +252,10 @@ def _choose_speaker_mode(config):
     print("  [1] 关闭（不使用声纹）")
     print("  [2] 识别模式（标注说话人）")
     print("  [3] 过滤模式（只转录指定人）")
-    spk_choice = input("  输入 1/2/3: ").strip()
+    print("  [4] 实时注册模式（VAD自动采集声纹）")
+    spk_choice = input("  输入 1/2/3/4: ").strip()
 
-    if spk_choice not in ("2", "3"):
+    if spk_choice not in ("2", "3", "4"):
         return "off", None
 
     # 加载声纹处理器
@@ -258,6 +270,35 @@ def _choose_speaker_mode(config):
     if spk_choice == "2":
         logger.info("声纹识别模式已启用")
         return "identify", processor
+
+    if spk_choice == "4":
+        # 实时注册模式：选择或新建目标说话人
+        speakers = processor.db.list_manual_speakers()
+        if speakers:
+            print("\n  已注册说话人:")
+            for i, name in enumerate(speakers, 1):
+                print(f"  [{i}] {name}")
+            print(f"  [{len(speakers) + 1}] 新建说话人")
+            sel = input("  选择要注册的说话人: ").strip()
+            if sel.isdigit() and 1 <= int(sel) <= len(speakers):
+                target_name = speakers[int(sel) - 1]
+            else:
+                target_name = input("  输入新说话人名称: ").strip()
+        else:
+            target_name = input("  输入说话人名称: ").strip()
+
+        if not target_name:
+            logger.warning("未输入说话人名称，退化为关闭模式")
+            return "off", None
+
+        samples_input = input(f"  采集样本数（默认 5，最少 3）: ").strip()
+        enroll_samples = int(samples_input) if samples_input.isdigit() and int(samples_input) >= 3 else 5
+
+        config["speaker"]["enroll_target"] = target_name
+        config["speaker"]["enroll_samples"] = enroll_samples
+
+        logger.info("实时注册模式: 目标=%s, 采集%d个样本", target_name, enroll_samples)
+        return "enroll", processor
 
     # 过滤模式：选择白名单
     speakers = processor.db.list_manual_speakers()
@@ -402,6 +443,11 @@ def _run_vad_mode(args, config, output_method, append_newline, audio_source,
         speaker_processor=speaker_processor,
         speaker_mode=speaker_mode,
     )
+    # 传递交互式设置的 enroll 配置（worker 从文件加载的 config 不含交互输入）
+    if speaker_mode == "enroll":
+        spk_cfg = config.get("speaker", {})
+        worker._enroll_target = spk_cfg.get("enroll_target", "")
+        worker._enroll_samples = spk_cfg.get("enroll_samples", 5)
     worker.on_result = _make_result_handler(output_method, append_newline, worker)
     if args.save_dataset:
         worker.on_result = wrap_result_handler(worker.on_result, worker, args.dataset_dir)
