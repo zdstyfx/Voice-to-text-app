@@ -42,6 +42,9 @@ class AppState:
     append_newline: bool = False
     dedupe: bool = True
 
+    # Application config (set at startup)
+    config: dict = field(default_factory=dict)
+
     # Worker references (set at runtime, not serialized)
     worker: Optional[Any] = None
     audio: Optional[Any] = None
