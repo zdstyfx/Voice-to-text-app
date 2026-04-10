@@ -20,13 +20,6 @@ TEXT_SEC = '#b0b0c0'
 
 SPEAKER_COLORS = ['#4ade80', '#60a5fa', '#f97316', '#a78bfa', '#fb7185', '#fbbf24']
 
-# Module-level enrollment state (transient, not persisted)
-_enrollment_active = False
-_enrollment_name = ''
-_enrollment_target_samples = 5
-_enrollment_collected = 0
-_enrollment_worker = None
-
 
 # ------------------------------------------------------------------
 # Backend helpers
@@ -74,40 +67,19 @@ def _delete_speaker(name):
     ui.navigate.to('/speakers')
 
 
-def _stop_enrollment():
-    """Stop any active enrollment and clean up."""
-    global _enrollment_active, _enrollment_worker, _enrollment_collected
-    if _enrollment_worker is not None:
-        try:
-            _enrollment_worker.stop()
-            _enrollment_worker.cleanup()
-        except Exception as exc:
-            logger.error("Enrollment worker cleanup error: %s", exc)
-        _enrollment_worker = None
-    _enrollment_active = False
-    _enrollment_collected = 0
-
-
 def _start_enrollment(name, num_samples):
-    """Start voice enrollment process using VadTranscriptionWorker in enroll mode."""
-    global _enrollment_active, _enrollment_name, _enrollment_target_samples
-    global _enrollment_collected, _enrollment_worker
-
+    """Start voice enrollment by configuring speaker processor and worker."""
     if not name or not name.strip():
         ui.notify('请输入说话人名称', type='negative')
         return
     name = name.strip()
+    num_samples = int(num_samples)
 
     # Check for duplicate names
     db = _get_speaker_db()
     if name in db.list_speakers():
         ui.notify(f'说话人 "{name}" 已存在，请使用其他名称', type='negative')
         return
-
-    _enrollment_name = name
-    _enrollment_target_samples = int(num_samples)
-    _enrollment_collected = 0
-    _enrollment_active = True
 
     # Set up speaker processor if needed
     if app_state.speaker_processor is None:
@@ -117,12 +89,11 @@ def _start_enrollment(name, num_samples):
         except Exception as exc:
             logger.error("Failed to initialize SpeakerProcessor: %s", exc)
             ui.notify(f'声纹模型加载失败: {exc}', type='negative')
-            _enrollment_active = False
             return
 
     # Configure enrollment target in config
     app_state.config.setdefault('speaker', {})['enroll_target'] = name
-    app_state.config['speaker']['enroll_samples'] = _enrollment_target_samples
+    app_state.config['speaker']['enroll_samples'] = num_samples
 
     # Create audio source if needed
     if app_state.audio is None:
@@ -137,29 +108,23 @@ def _start_enrollment(name, num_samples):
         except Exception as exc:
             logger.error("Failed to create AudioCapture: %s", exc)
             ui.notify(f'音频设备初始化失败: {exc}', type='negative')
-            _enrollment_active = False
             return
 
     # Create VadTranscriptionWorker in enroll mode
     try:
         from app.vad_worker import VadTranscriptionWorker
-        _enrollment_worker = VadTranscriptionWorker(
-            on_result=None,  # Enrollment doesn't produce transcription results
+        worker = VadTranscriptionWorker(
+            on_result=None,
             audio_source=app_state.audio,
             speaker_processor=app_state.speaker_processor,
             speaker_mode='enroll',
         )
-        _enrollment_worker.start()
-        logger.info("Enrollment started for '%s' (%d samples)", name, _enrollment_target_samples)
+        worker.start()
+        logger.info("Enrollment started for '%s' (%d samples)", name, num_samples)
+        ui.notify(f'开始采集 {name} 的声纹 ({num_samples} 样本)', type='info')
     except Exception as exc:
         logger.error("Failed to start enrollment worker: %s", exc)
         ui.notify(f'采集启动失败: {exc}', type='negative')
-        _enrollment_active = False
-        _enrollment_worker = None
-        return
-
-    # Refresh page to show enrollment UI
-    ui.navigate.to('/speakers')
 
 
 # ------------------------------------------------------------------
@@ -185,11 +150,12 @@ def speakers_page():
     # ---- 1. Registered Speakers Card ----
     _speaker_list_card(speaker_list)
 
-    # ---- 2. Enrollment flow or new registration card ----
-    if _enrollment_active:
-        _enrollment_card()
-    else:
-        _new_registration_card()
+    # ---- 2. Diarize session speakers (if active) ----
+    if app_state.speaker_mode == 'diarize' and app_state.speaker_cluster is not None:
+        _diarize_card()
+
+    # ---- 3. New registration card ----
+    _new_registration_card()
 
 
 # ------------------------------------------------------------------
@@ -355,97 +321,126 @@ def _new_registration_card():
 
 
 # ------------------------------------------------------------------
-# Card 3: Enrollment Flow (shown when enrolling)
+# Card 3: Diarize Session Speakers
 # ------------------------------------------------------------------
 
-def _enrollment_card():
-    """Card showing enrollment progress with live sample collection."""
-    global _enrollment_collected
+def _diarize_card():
+    """Card showing current session's diarized speakers with rename support."""
+
+    cluster = app_state.speaker_cluster
+    speakers = cluster.get_speakers()
 
     with ui.element('div').style(
         f'background: {CARD_BG}; border-radius: 12px; padding: 20px 24px; '
         f'margin-bottom: 16px; border: 1px solid {ACCENT};'
     ):
-        ui.label('声纹采集中').style(
+        ui.label('当前会话说话人').style(
             f'color: {ACCENT}; font-size: 16px; font-weight: 600; '
-            f'margin-bottom: 8px;'
+            f'margin-bottom: 4px;'
         )
-
-        ui.label(
-            f'正在采集 {_enrollment_name} 的声纹样本...'
-        ).style(
-            f'color: {TEXT_MAIN}; font-size: 14px; margin-bottom: 16px;'
-        )
-
-        # Progress bar
-        progress_label = ui.label(
-            f'{_enrollment_collected} / {_enrollment_target_samples} 样本'
-        ).style(
-            f'color: {TEXT_SEC}; font-size: 13px; margin-bottom: 6px;'
-        )
-
-        progress_bar = ui.linear_progress(
-            value=_enrollment_collected / max(_enrollment_target_samples, 1),
-            show_value=False,
-        ).props('rounded').style(
-            f'height: 8px; margin-bottom: 16px;'
-        )
-
-        # Instructions
-        ui.label('请对着麦克风说话，系统会自动检测并采集声纹样本。').style(
+        ui.label('说话人分离模式 — 自动检测到的说话人').style(
             f'color: {TEXT_SEC}; font-size: 12px; margin-bottom: 12px;'
         )
 
-        # Status indicator (animated)
-        status_label = ui.label('等待语音输入...').style(
-            f'color: {WARNING}; font-size: 13px; margin-bottom: 16px;'
-        )
+        if not speakers:
+            ui.label('尚未检测到说话人，开始录音后将自动识别。').style(
+                f'color: {TEXT_SEC}; font-size: 13px; font-style: italic; '
+                f'padding: 16px 0;'
+            )
+        else:
+            for idx, spk in enumerate(speakers):
+                _diarize_speaker_row(idx, spk)
 
-        # Cancel button
-        ui.button(
-            '取消采集',
-            icon='stop',
-            on_click=lambda: (_stop_enrollment(), ui.navigate.to('/speakers')),
-        ).props('flat').style(
-            f'background: {ERROR}; color: white; border-radius: 8px; '
-            f'padding: 8px 20px;'
-        )
+        # Reset button
+        if speakers:
+            ui.separator().style('margin: 12px 0; opacity: 0.2;')
 
-        # Timer to poll enrollment progress from the worker
-        def _poll_enrollment():
-            global _enrollment_collected, _enrollment_active, _enrollment_worker
-
-            if not _enrollment_active or _enrollment_worker is None:
-                return
-
-            # Poll the worker's enroll count
-            try:
-                current_count = _enrollment_worker._enroll_count
-            except Exception:
-                current_count = _enrollment_collected
-
-            if current_count != _enrollment_collected:
-                _enrollment_collected = current_count
-                ratio = _enrollment_collected / max(_enrollment_target_samples, 1)
-                progress_bar.value = ratio
-                progress_label.text = f'{_enrollment_collected} / {_enrollment_target_samples} 样本'
-                status_label.text = f'已采集第 {_enrollment_collected} 个样本'
-                status_label.style(f'color: {SUCCESS}; font-size: 13px; margin-bottom: 16px;')
-
-            # Check if enrollment is complete
-            # The worker switches to "filter" mode when done
-            try:
-                worker_mode = _enrollment_worker._speaker_mode
-            except Exception:
-                worker_mode = 'enroll'
-
-            if worker_mode != 'enroll' or _enrollment_collected >= _enrollment_target_samples:
-                # Enrollment complete
-                _stop_enrollment()
-                ui.notify(
-                    f'声纹注册完成: {_enrollment_name} ({_enrollment_collected} 样本)',
-                    type='positive',
-                )
+            def _reset_cluster():
+                cluster.reset()
+                ui.notify('已重置说话人聚类', type='info')
                 ui.navigate.to('/speakers')
 
-        ui.timer(0.5, _poll_enrollment)
+            ui.button('重置聚类', icon='refresh', on_click=_reset_cluster).props(
+                'flat dense'
+            ).style(f'color: {WARNING}; font-size: 12px;')
+
+    # Auto-refresh timer to pick up new speakers
+    initial_count = len(speakers)
+
+    def _poll_diarize():
+        if app_state.speaker_cluster is None:
+            return
+        current = len(app_state.speaker_cluster.get_speakers())
+        if current != initial_count:
+            ui.navigate.to('/speakers')
+
+    ui.timer(2.0, _poll_diarize)
+
+
+def _diarize_speaker_row(idx, spk):
+    """Single diarized speaker row with rename support."""
+    color = SPEAKER_COLORS[idx % len(SPEAKER_COLORS)]
+    name = spk['name']
+    count = spk['count']
+
+    with ui.row().classes('items-center w-full no-wrap').style(
+        f'padding: 8px 0; border-bottom: 1px solid #2a2a3e;'
+    ):
+        # Color avatar
+        ui.element('div').style(
+            f'width: 32px; height: 32px; border-radius: 8px; '
+            f'background: {color}; flex-shrink: 0; '
+            f'display: flex; align-items: center; justify-content: center; '
+            f'color: white; font-weight: 600; font-size: 13px;'
+        ).props(f'innerHTML="{name[0] if name else "?"}"')
+
+        # Name and count
+        with ui.column().style('flex: 1; gap: 2px; margin-left: 12px;'):
+            ui.label(name).style(
+                f'color: {TEXT_MAIN}; font-size: 14px; font-weight: 500;'
+            )
+            ui.label(f'{count} 段语音').style(
+                f'color: {TEXT_SEC}; font-size: 11px;'
+            )
+
+        # Rename button
+        def _rename_dialog(old_name=name):
+            with ui.dialog() as dialog, ui.card().style(
+                f'background: {CARD_BG}; border-radius: 12px; padding: 20px;'
+            ):
+                ui.label(f'重命名 "{old_name}"').style(
+                    f'color: {TEXT_MAIN}; font-size: 14px; margin-bottom: 12px;'
+                )
+                name_input = ui.input(
+                    label='新名称', placeholder='例如: 张三',
+                ).props('dense outlined dark autofocus').style('width: 220px;')
+
+                def _do_rename():
+                    new_name = name_input.value.strip()
+                    if not new_name:
+                        ui.notify('请输入名称', type='warning')
+                        return
+                    if app_state.speaker_cluster and app_state.speaker_cluster.rename(old_name, new_name):
+                        # Update existing transcription results
+                        for r in app_state.transcription_results:
+                            if r.get('speaker') == old_name:
+                                r['speaker'] = new_name
+                        ui.notify(f'已重命名: {old_name} → {new_name}', type='positive')
+                        dialog.close()
+                        ui.navigate.to('/speakers')
+                    else:
+                        ui.notify('重命名失败（名称冲突或不存在）', type='negative')
+
+                with ui.row().classes('justify-end gap-2').style('margin-top: 12px;'):
+                    ui.button('取消', on_click=dialog.close).props('flat').style(
+                        f'color: {TEXT_SEC};'
+                    )
+                    ui.button('确认', on_click=_do_rename).props('flat').style(
+                        f'background: {ACCENT}; color: white; border-radius: 8px; '
+                        f'padding: 6px 16px;'
+                    )
+            dialog.open()
+
+        ui.button(icon='edit', on_click=_rename_dialog).props(
+            'flat dense round'
+        ).style(f'color: {ACCENT}; opacity: 0.7;').tooltip('重命名')
