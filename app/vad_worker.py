@@ -36,6 +36,7 @@ class VadTranscriptionWorker:
         audio_source: Optional[AudioSource] = None,
         speaker_processor: Optional[object] = None,
         speaker_mode: str = "off",
+        speaker_cluster: Optional[object] = None,
     ) -> None:
         self.config = load_config(config_path)
         self.on_result = on_result
@@ -62,11 +63,7 @@ class VadTranscriptionWorker:
         self._speaker_processor = speaker_processor
         self._speaker_mode = speaker_mode
 
-        # Enroll mode state
-        spk_cfg = self.config.get("speaker", {})
-        self._enroll_target = spk_cfg.get("enroll_target", "")
-        self._enroll_samples = spk_cfg.get("enroll_samples", 5)
-        self._enroll_count = 0
+        self._speaker_cluster = speaker_cluster
 
         # VAD processor
         self._vad = VadProcessor(self.config)
@@ -235,38 +232,19 @@ class VadTranscriptionWorker:
         duration_s = len(combined) / self._audio_cfg["sample_rate"]
         logger.info("VAD: submitting %.2fs of speech for transcription", duration_s)
 
-        # Enroll mode: store embedding and skip transcription
-        if self._speaker_mode == "enroll" and self._speaker_processor:
-            if not self._enroll_target:
-                logger.error("Enroll mode but no enroll_target configured")
-                return
-            try:
-                embedding = self._speaker_processor.extract_embedding(combined)
-                self._speaker_processor.db.enroll(self._enroll_target, embedding)
-                self._enroll_count += 1
-                logger.info(
-                    "Enroll: stored sample %d/%d for '%s'",
-                    self._enroll_count,
-                    self._enroll_samples,
-                    self._enroll_target,
-                )
-                if self._enroll_count >= self._enroll_samples:
-                    logger.info(
-                        "Enroll complete: %d samples for '%s'. Switching to filter mode.",
-                        self._enroll_count,
-                        self._enroll_target,
-                    )
-                    self._speaker_mode = "filter"
-                    self._enroll_count = 0
-            except Exception as exc:
-                logger.error("Enroll embedding extraction failed: %s", exc)
-            return
-
         # Speaker recognition
         speaker_id: Optional[str] = None
         speaker_confidence: Optional[float] = None
 
-        if self._speaker_processor:
+        # Diarize mode: assign embedding to cluster
+        if self._speaker_mode == "diarize" and self._speaker_cluster and self._speaker_processor:
+            try:
+                embedding = self._speaker_processor.extract_embedding(combined)
+                speaker_id = self._speaker_cluster.assign(embedding)
+            except Exception as exc:
+                logger.warning("Diarize embedding extraction failed: %s", exc)
+
+        elif self._speaker_processor:
             if self._speaker_mode == "filter":
                 ok, sid = self._speaker_processor.should_transcribe(combined)
                 if not ok:

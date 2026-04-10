@@ -51,7 +51,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "speaker": {
         "enabled": False,
-        "mode": "identify",       # "identify" | "filter" | "enroll" | "off"
+        "mode": "identify",       # "identify" | "filter" | "diarize" | "off"
         "model": "iic/speech_campplus_sv_zh-cn_16k-common",
         "threshold": 0.45,
         "db_path": "speaker_db.json",
@@ -61,9 +61,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "incremental_learn": True,
         "incremental_margin": 0.10,
         "max_embeddings": 50,
-        "enroll_target": "",
-        "enroll_samples": 5,
-        "min_enroll_samples": 3,
     },
     "logging": {"dir": "logs", "level": "INFO"},
 }
