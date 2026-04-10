@@ -2,18 +2,30 @@
 
 ## 概述
 
-基于现有 CAM++ 模型实现无监督说话人分离：不需要预注册声纹，VAD 检测到语音后自动聚类，标注"说话人1""说话人2"等。适用于会议、访谈等多人场景。
+基于现有 CAM++ 模型新增无监督说话人分离模式（diarize）：不需要预注册声纹，VAD 检测到语音后自动聚类，标注"说话人1""说话人2"等。适用于会议、访谈等多人场景。
 
-同时删除旧的声纹识别功能（identify/filter/enroll 模式），只保留 diarize 模式。
+同时删除旧的"实时注册模式"（enroll）— VAD 自动采集声纹样本的功能。保留声纹注册（CLI/UI手动注册）、identify 模式、filter 模式。
+
+## 变更范围
+
+| 内容 | 操作 |
+|------|------|
+| `app/speaker.py` — `SpeakerProcessor` 全部功能 | **保留** |
+| `app/speaker_db.py` — `SpeakerDB` | **保留** |
+| `app/speaker_enroll.py` — 注册 CLI | **保留** |
+| `app/enrollment_ui.py` — 注册交互 UI | **保留** |
+| identify 模式（标注已知说话人） | **保留** |
+| filter 模式（白名单过滤） | **保留** |
+| enroll 模式（VAD 自动采集声纹） | **删除** |
+| diarize 模式（无监督说话人分离） | **新增** |
 
 ## 设计决策
 
 | 决策 | 选择 | 理由 |
 |------|------|------|
 | 聚类算法 | 在线增量聚类 | 实时标注，符合转写交互体验 |
-| 与旧声纹库关系 | 完全独立 | 旧功能删除，新功能不依赖 SpeakerDB |
+| 与声纹库关系 | 完全独立 | diarize 不依赖 SpeakerDB，是纯内存聚类 |
 | 聚类状态 | 纯内存 | 每次会话重置，无需持久化 |
-| 已注册声纹 | 删除相关功能 | identify/filter/enroll 全部移除 |
 | 改名支持 | 需要 | 转写结束后可在 Web UI 给说话人改名 |
 
 ## 架构
@@ -59,93 +71,84 @@ class SpeakerCluster:
 - 最高分 < `threshold` → 创建新 cluster，命名 "说话人{N+1}"
 - 质心更新采用增量平均 + L2 归一化
 
-### 保留组件
+### 删除内容
 
-#### `app/speaker.py` — 精简为 embedding 提取器
+#### `app/vad_worker.py` — 删除 enroll 分支
 
-保留：
-- `SpeakerProcessor.__init__()` — CAM++ 模型加载
-- `SpeakerProcessor.extract_embedding()` — 音频 → 192 维 embedding
-
-删除：
-- `SpeakerResult` dataclass
-- `identify()` 方法
-- `should_transcribe()` 方法
-- 所有 whitelist / incremental_learn / auto_learn 逻辑
-
-### 删除组件
-
-| 文件 | 操作 | 理由 |
-|------|------|------|
-| `app/speaker_db.py` | 删除 | 声纹库不再需要 |
-| `app/speaker_enroll.py` | 删除 | 注册 CLI 不再需要 |
-| `app/enrollment_ui.py` | 删除 | 注册交互 UI 不再需要 |
-| `speaker_db.json` | 删除 | 声纹库数据文件不再需要 |
-
-### 修改组件
-
-#### `app/config.py`
-
-精简 `speaker` 配置段：
-
+删除 `_submit_speech()` 中的 enroll 模式分支（lines 239-263）：
 ```python
-"speaker": {
-    "enabled": False,
-    "mode": "diarize",        # 唯一模式，保留字段是为了 on/off 控制
-    "model": "iic/speech_campplus_sv_zh-cn_16k-common",
-    "threshold": 0.45,        # 聚类阈值
-}
+# 删除这段
+if self._speaker_mode == "enroll" and self._speaker_processor:
+    ...
+    return
 ```
 
-删除：`db_path`, `auto_learn`, `whitelist`, `incremental_learn`, `incremental_margin`, `max_embeddings`, `enroll_target`, `enroll_samples`, `min_enroll_samples`
+删除构造函数中的 enroll 相关状态：
+- `_enroll_target`
+- `_enroll_count`
+- `_enroll_samples`
 
-#### `app/vad_worker.py`
+#### `app/config.py` — 删除 enroll 配置项
 
-`_submit_speech()` 中：
-- 删除 identify/filter/enroll 分支
-- 新增 diarize 分支：
+删除：`enroll_target`, `enroll_samples`, `min_enroll_samples`
+
+保留其余所有 speaker 配置项（enabled, mode, model, threshold, db_path, auto_learn, whitelist, incremental_learn, incremental_margin, max_embeddings）。
+
+#### `main.py` — 删除实时注册模式入口
+
+声纹选择子菜单从：
+```
+[1] 关闭
+[2] 识别模式（标注说话人）
+[3] 过滤模式（只转录指定人）
+[4] 实时注册模式（VAD自动采集声纹）
+```
+
+变为：
+```
+[1] 关闭
+[2] 识别模式（标注说话人）
+[3] 过滤模式（只转录指定人）
+[4] 说话人分离（自动区分不同说话人）
+```
+
+#### Web UI — 删除 enroll 相关
+
+- `app/web/pages/settings.py`：speaker mode 下拉框移除 "enroll" 选项，新增 "diarize" 选项
+- `app/web/pages/speakers.py`：删除实时注册进度跟踪（enrollment progress），保留手动注册功能
+
+### 新增内容
+
+#### `app/vad_worker.py` — 新增 diarize 分支
+
+在 `_submit_speech()` 中新增 diarize 模式：
 
 ```python
-if self._speaker_cluster and self._speaker_processor:
+elif self._speaker_mode == "diarize":
     try:
         embedding = self._speaker_processor.extract_embedding(combined)
         speaker_id = self._speaker_cluster.assign(embedding)
+        speaker_confidence = ...  # assign 返回的相似度分数
     except Exception:
         speaker_id = None
 ```
 
-构造函数变化：
-- 删除 `speaker_mode` 参数
-- 新增 `speaker_cluster: Optional[SpeakerCluster]` 参数
-- 保留 `speaker_processor: Optional[SpeakerProcessor]` 参数
+构造函数新增 `speaker_cluster: Optional[SpeakerCluster]` 参数。
 
-#### `app/transcribe.py`
-
-`TranscriptionResult` 保持不变 — `speaker` 和 `speaker_confidence` 字段继续使用。diarize 模式下 `speaker_confidence` 可设为聚类相似度分数。
-
-#### `main.py`
-
-- 删除声纹管理菜单（`[3] 声纹注册/管理`）
-- 删除声纹模式选择子菜单（identify/filter/enroll）
-- 简化为：转写时如果 `speaker.enabled`，自动启用 diarize
-
-#### Web UI 改动
+#### Web UI — 说话人分离支持
 
 **`app/web/pages/settings.py`**：
-- speaker mode 下拉框简化为 开/关（enabled toggle）
-- 删除 whitelist 管理
+- speaker mode 下拉框新增 "说话人分离" 选项
 
 **`app/web/pages/speakers.py`**：
-- 删除原注册/管理功能
-- 改为：显示当前会话的说话人列表（从 SpeakerCluster 读取）
-- 每个说话人旁边有改名按钮
+- 新增区域：显示当前会话的聚类说话人列表（从 SpeakerCluster 读取）
+- 每个说话人旁边有改名按钮，点击弹出输入框
 
 **`app/web/pages/transcribe.py`**：
-- 已有 speaker badge 显示逻辑自动适用
-- 改名后需要刷新已显示的转写记录中的说话人名称
+- 已有 speaker badge 显示逻辑自动适用（显示 "说话人1" 而非 "张三"）
+- 改名后刷新已显示的转写记录中的说话人名称
 
 **`app/web/state.py`**：
-- 删除 `speaker_mode`, `speaker_whitelist` 等旧状态
 - 新增 `speaker_cluster: Optional[SpeakerCluster]` 引用
 
 ## 数据流
