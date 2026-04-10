@@ -66,11 +66,30 @@ def _ensure_worker():
     _ensure_audio_source()
     if app_state.recording_mode == 'vad':
         from app.vad_worker import VadTranscriptionWorker
+
+        speaker_cluster = None
+        if app_state.speaker_mode == 'diarize':
+            if app_state.speaker_cluster is None:
+                from app.speaker_cluster import SpeakerCluster
+                threshold = app_state.config.get('speaker', {}).get('threshold', 0.45)
+                app_state.speaker_cluster = SpeakerCluster(threshold=threshold)
+            speaker_cluster = app_state.speaker_cluster
+
+            # Ensure speaker processor is loaded for embedding extraction
+            if app_state.speaker_processor is None:
+                try:
+                    from app.speaker import SpeakerProcessor
+                    app_state.config.setdefault('speaker', {})['enabled'] = True
+                    app_state.speaker_processor = SpeakerProcessor(app_state.config)
+                except Exception as exc:
+                    logger.error("Failed to load speaker model for diarize: %s", exc)
+
         app_state.worker = VadTranscriptionWorker(
             on_result=_on_transcription_result,
             audio_source=app_state.audio,
             speaker_processor=app_state.speaker_processor,
             speaker_mode=app_state.speaker_mode,
+            speaker_cluster=speaker_cluster,
         )
     else:
         from app.transcribe import TranscriptionWorker
@@ -119,6 +138,9 @@ def _cleanup_worker():
         except Exception:
             pass
         app_state.audio = None
+    if app_state.speaker_cluster is not None:
+        app_state.speaker_cluster.reset()
+        app_state.speaker_cluster = None
 
 
 # ------------------------------------------------------------------

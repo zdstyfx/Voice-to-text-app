@@ -32,7 +32,7 @@ class AppState:
     esp32_port: int = 6000
 
     # Speaker recognition
-    speaker_mode: str = "off"  # "off" | "identify" | "filter" | "enroll"
+    speaker_mode: str = "off"  # "off" | "identify" | "filter" | "diarize"
     speaker_whitelist: list = field(default_factory=list)
 
     # VAD settings
@@ -49,6 +49,7 @@ class AppState:
     worker: Optional[Any] = None
     audio: Optional[Any] = None
     speaker_processor: Optional[Any] = None
+    speaker_cluster: Optional[Any] = None
 
 
 # Module-level singleton

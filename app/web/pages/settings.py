@@ -82,7 +82,7 @@ def settings_page():
             ('关闭', 'off'),
             ('识别', 'identify'),
             ('过滤', 'filter'),
-            ('实时注册', 'enroll'),
+            ('说话人分离', 'diarize'),
         ]
 
         def _set_speaker_mode(mode: str):
@@ -122,6 +122,13 @@ def settings_page():
             else:
                 ui.label('无已注册说话人').style(
                     f'color: {TEXT_SEC}; font-size: 13px; font-style: italic;')
+
+        # Diarize mode info
+        if app_state.speaker_mode == 'diarize':
+            ui.separator().style('margin: 12px 0; opacity: 0.2;')
+            ui.label('自动区分不同说话人，无需预注册声纹。需配合 VAD 模式使用。').style(
+                f'color: {TEXT_SEC}; font-size: 13px;'
+            )
 
     # ----------------------------------------------------------------
     # Section 3: VAD parameters
