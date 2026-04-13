@@ -67,64 +67,6 @@ def _delete_speaker(name):
     ui.navigate.to('/speakers')
 
 
-def _start_enrollment(name, num_samples):
-    """Start voice enrollment by configuring speaker processor and worker."""
-    if not name or not name.strip():
-        ui.notify('请输入说话人名称', type='negative')
-        return
-    name = name.strip()
-    num_samples = int(num_samples)
-
-    # Check for duplicate names
-    db = _get_speaker_db()
-    if name in db.list_speakers():
-        ui.notify(f'说话人 "{name}" 已存在，请使用其他名称', type='negative')
-        return
-
-    # Set up speaker processor if needed
-    if app_state.speaker_processor is None:
-        try:
-            from app.speaker import SpeakerProcessor
-            app_state.speaker_processor = SpeakerProcessor(app_state.config)
-        except Exception as exc:
-            logger.error("Failed to initialize SpeakerProcessor: %s", exc)
-            ui.notify(f'声纹模型加载失败: {exc}', type='negative')
-            return
-
-    # Configure enrollment target in config
-    app_state.config.setdefault('speaker', {})['enroll_target'] = name
-    app_state.config['speaker']['enroll_samples'] = num_samples
-
-    # Create audio source if needed
-    if app_state.audio is None:
-        try:
-            from app.audio_capture import AudioCapture
-            audio_cfg = app_state.config.get('audio', {})
-            app_state.audio = AudioCapture(
-                sample_rate=audio_cfg.get('sample_rate', 16000),
-                block_ms=audio_cfg.get('block_ms', 20),
-                device=audio_cfg.get('device'),
-            )
-        except Exception as exc:
-            logger.error("Failed to create AudioCapture: %s", exc)
-            ui.notify(f'音频设备初始化失败: {exc}', type='negative')
-            return
-
-    # Create VadTranscriptionWorker in enroll mode
-    try:
-        from app.vad_worker import VadTranscriptionWorker
-        worker = VadTranscriptionWorker(
-            on_result=None,
-            audio_source=app_state.audio,
-            speaker_processor=app_state.speaker_processor,
-            speaker_mode='enroll',
-        )
-        worker.start()
-        logger.info("Enrollment started for '%s' (%d samples)", name, num_samples)
-        ui.notify(f'开始采集 {name} 的声纹 ({num_samples} 样本)', type='info')
-    except Exception as exc:
-        logger.error("Failed to start enrollment worker: %s", exc)
-        ui.notify(f'采集启动失败: {exc}', type='negative')
 
 
 # ------------------------------------------------------------------
@@ -272,50 +214,29 @@ def _confirm_delete(name):
 # ------------------------------------------------------------------
 
 def _new_registration_card():
-    """Card for starting a new speaker enrollment."""
+    """Card with instructions for registering new speakers via CLI."""
 
     with ui.element('div').style(
         f'background: {CARD_BG}; border-radius: 12px; padding: 20px 24px; '
         f'margin-bottom: 16px;'
     ):
-        ui.label('新建注册').style(
+        ui.label('注册新说话人').style(
             f'color: {TEXT_MAIN}; font-size: 16px; font-weight: 600; '
             f'margin-bottom: 12px;'
         )
 
-        # Name input
-        name_input = ui.input(
-            label='说话人名称',
-            placeholder='例如: 张三',
-        ).props('dense outlined dark').style(
-            f'width: 250px; font-size: 13px; margin-bottom: 8px;'
+        ui.label('使用命令行工具注册新的说话人声纹：').style(
+            f'color: {TEXT_SEC}; font-size: 13px; margin-bottom: 8px;'
         )
 
-        # Sample count input
-        with ui.row().classes('items-end gap-4'):
-            sample_input = ui.number(
-                label='采集样本数',
-                value=5,
-                min=3,
-                max=20,
-            ).props('dense outlined dark').style(
-                f'width: 140px; font-size: 13px;'
-            ).tooltip('建议采集 5 个以上样本以获得较好的识别效果')
-
-            # Start button
-            ui.button(
-                '开始采集',
-                icon='mic',
-                on_click=lambda: _start_enrollment(name_input.value, sample_input.value),
-            ).props('flat').style(
-                f'background: {ACCENT}; color: white; border-radius: 8px; '
-                f'padding: 8px 20px;'
-            )
+        ui.code(
+            'python -m app.speaker_enroll enroll --name "张三" --samples 5'
+        ).style('margin-bottom: 8px;')
 
         ui.label(
             '注册时请在安静环境中，对着麦克风清晰说话。每个样本需说 2-5 秒。'
         ).style(
-            f'color: {TEXT_SEC}; font-size: 11px; margin-top: 12px; '
+            f'color: {TEXT_SEC}; font-size: 11px; margin-top: 8px; '
             f'font-style: italic;'
         )
 
