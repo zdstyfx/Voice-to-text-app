@@ -166,8 +166,7 @@ def main() -> None:
         print("  [1] 语音转写")
         print("  [2] ESP32 无线麦克风")
         print("  [3] 声纹注册/管理")
-        print("  [4] Web UI (浏览器控制面板)")
-        choice = input("\n  输入 1/2/3/4: ").strip()
+        choice = input("\n  输入 1/2/3: ").strip()
 
         if choice == "1":
             _run_transcription_flow(args, config)
@@ -178,10 +177,6 @@ def main() -> None:
         elif choice == "3":
             from app.enrollment_ui import run_enrollment_menu
             run_enrollment_menu(config)
-        elif choice == "4":
-            from app.web import start_web_ui
-            start_web_ui(config)
-            break
             # 返回主菜单
         else:
             print("  无效选择，请重新输入")
@@ -216,6 +211,9 @@ def _run_transcription_flow(args, config, audio_source=None) -> None:
                     device=device_index,
                 )
 
+    # 交互式选择 ASR 引擎
+    _choose_asr_backend(config)
+
     # 交互式选择声纹识别
     speaker_mode, speaker_processor = _choose_speaker_mode(config)
 
@@ -223,9 +221,13 @@ def _run_transcription_flow(args, config, audio_source=None) -> None:
     print("\n  选择模式:")
     print("  [1] F2 热键模式（按 F2 开始/停止录音）")
     print("  [2] VAD 自动检测模式（持续监听）")
-    mode_choice = input("  输入 1 或 2: ").strip()
+    print("  [3] VAD + KWS 语音助手模式（唤醒词激活）")
+    mode_choice = input("  输入 1/2/3: ").strip()
 
-    if mode_choice == "2":
+    if mode_choice == "3":
+        _run_kws_mode(args, config, output_method, append_newline, audio_source,
+                      speaker_processor, speaker_mode)
+    elif mode_choice == "2":
         _run_vad_mode(args, config, output_method, append_newline, audio_source,
                       speaker_processor, speaker_mode)
     else:
@@ -246,16 +248,40 @@ def _run_esp32_mic_mode() -> None:
     run_esp32_receiver(save_file=save_file)
 
 
+def _choose_asr_backend(config) -> None:
+    """交互选择 ASR 引擎（本地/云端），直接修改 config dict。"""
+    print("\n  选择语音识别引擎:")
+    print("  [1] 本地 FunASR（离线，需要下载模型）")
+    print("  [2] 云端 DashScope（在线，需要 API Key）")
+    asr_choice = input("  输入 1/2（默认 1）: ").strip()
+
+    if asr_choice != "2":
+        return
+
+    # 检查 API key 是否可用
+    import os
+    api_key = config.get("cloud_asr", {}).get("api_key", "")
+    if not api_key:
+        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        print("  ⚠ DashScope API Key 未配置！")
+        print("  请在 config.json 设置 cloud_asr.api_key 或设置环境变量 DASHSCOPE_API_KEY")
+        print("  → 回退到本地 FunASR")
+        return
+
+    config["asr"]["backend"] = "cloud"
+    logger.info("ASR 引擎: 云端 DashScope (模型: %s)", config.get("cloud_asr", {}).get("model", "paraformer-realtime-v2"))
+
+
 def _choose_speaker_mode(config):
     """交互选择声纹识别模式，返回 (mode_str, processor_or_None)"""
     print("\n  声纹识别:")
     print("  [1] 关闭（不使用声纹）")
-    print("  [2] 识别模式（标注说话人）")
+    print("  [2] 识别模式（标注说话人，已注册标名字，未注册自动区分）")
     print("  [3] 过滤模式（只转录指定人）")
-    print("  [4] 说话人分离（自动区分不同说话人）")
-    spk_choice = input("  输入 1/2/3/4: ").strip()
+    spk_choice = input("  输入 1/2/3: ").strip()
 
-    if spk_choice not in ("2", "3", "4"):
+    if spk_choice not in ("2", "3"):
         return "off", None
 
     # 加载声纹处理器
@@ -268,12 +294,8 @@ def _choose_speaker_mode(config):
         return "off", None
 
     if spk_choice == "2":
-        logger.info("声纹识别模式已启用")
+        logger.info("声纹识别模式已启用（含自动分离）")
         return "identify", processor
-
-    if spk_choice == "4":
-        logger.info("说话人分离模式已启用")
-        return "diarize", processor
 
     # 过滤模式：选择白名单
     speakers = processor.db.list_manual_speakers()
@@ -391,7 +413,8 @@ def _run_f2_mode(args, config, output_method, append_newline, audio_source) -> N
         except Exception as exc:
             logger.debug("清理 worker 时出错: %s", exc)
         try:
-            worker.fun_server.cleanup()
+            if worker.fun_server:
+                worker.fun_server.cleanup()
         except Exception as exc:
             logger.debug("清理 FunASR 服务器时出错: %s", exc)
         try:
@@ -412,7 +435,7 @@ def _run_vad_mode(args, config, output_method, append_newline, audio_source,
     from app.vad_worker import VadTranscriptionWorker
 
     speaker_cluster = None
-    if speaker_mode == "diarize":
+    if speaker_mode in ("identify", "diarize"):
         from app.speaker_cluster import SpeakerCluster
         threshold = config.get("speaker", {}).get("threshold", 0.45)
         speaker_cluster = SpeakerCluster(threshold=threshold)
@@ -457,15 +480,122 @@ def _run_vad_mode(args, config, output_method, append_newline, audio_source,
         except Exception as exc:
             logger.debug("清理 VAD worker 时出错: %s", exc)
         try:
-            worker.fun_server.cleanup()
+            if worker.fun_server:
+                worker.fun_server.cleanup()
         except Exception as exc:
             logger.debug("清理 FunASR 服务器时出错: %s", exc)
         logger.info("所有资源已清理，正常退出")
         sys.exit(0)
 
 
+def _run_kws_mode(args, config, output_method, append_newline, audio_source,
+                  speaker_processor=None, speaker_mode="off") -> None:
+    """KWS 语音助手模式"""
+    from app.vad_worker import VadTranscriptionWorker
+
+    config["kws"]["enabled"] = True
+
+    speaker_cluster = None
+    if speaker_mode in ("identify", "diarize"):
+        from app.speaker_cluster import SpeakerCluster
+        threshold = config.get("speaker", {}).get("threshold", 0.45)
+        speaker_cluster = SpeakerCluster(threshold=threshold)
+
+    worker = VadTranscriptionWorker(
+        config_path=args.config,
+        on_result=None,
+        audio_source=audio_source,
+        speaker_processor=speaker_processor,
+        speaker_mode=speaker_mode,
+        speaker_cluster=speaker_cluster,
+        kws_enabled=True,
+    )
+    worker.on_result = _make_result_handler(output_method, append_newline, worker)
+    if args.save_dataset:
+        worker.on_result = wrap_result_handler(worker.on_result, worker, args.dataset_dir)
+
+    try:
+        worker.start()
+        mode_hint = "UDP" if audio_source is not None else "麦克风"
+        logger.info("KWS 语音助手模式启动（%s）", mode_hint)
+        print(f"\n{'='*50}")
+        print(f"  Vocotype 就绪 (KWS 语音助手模式, {mode_hint})")
+        print(f"  说唤醒词激活，超时自动回到监听态")
+        print(f"  按 Ctrl+C 退出")
+        print(f"{'='*50}\n")
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("用户中断，正在退出...")
+    except Exception as exc:
+        logger.error("意外异常导致退出: %s", exc, exc_info=True)
+    finally:
+        try:
+            worker.stop()
+        except Exception as exc:
+            logger.debug("停止 KWS worker 时出错: %s", exc)
+        try:
+            worker.cleanup()
+        except Exception as exc:
+            logger.debug("清理 KWS worker 时出错: %s", exc)
+        try:
+            if worker.fun_server:
+                worker.fun_server.cleanup()
+        except Exception as exc:
+            logger.debug("清理 FunASR 服务器时出错: %s", exc)
+        logger.info("所有资源已清理，正常退出")
+        sys.exit(0)
+
+
+_PUNC_CHARS = set("，。！？、；：""''（）【】《》—…· ,.!?;:")
+
+
+def _remove_overlap(prev: str, curr: str, max_overlap: int = 25) -> str:
+    """Remove overlapping prefix of *curr* that duplicates suffix of *prev*.
+
+    Comparison ignores punctuation so that the same words with different
+    punctuation (e.g. "功能。" vs "功能，") are still detected as overlap.
+    """
+    if not prev or not curr:
+        return curr
+
+    prev_clean = "".join(c for c in prev if c not in _PUNC_CHARS)
+    curr_clean = "".join(c for c in curr if c not in _PUNC_CHARS)
+
+    if not prev_clean or not curr_clean:
+        return curr
+
+    max_check = min(len(prev_clean), len(curr_clean), max_overlap)
+    best = 0
+    for length in range(max_check, 1, -1):
+        if prev_clean[-length:] == curr_clean[:length]:
+            best = length
+            break
+
+    if best < 2:
+        return curr
+
+    # Map *best* clean-char count to an index in the original *curr* string
+    clean_seen = 0
+    for i, ch in enumerate(curr):
+        if ch not in _PUNC_CHARS:
+            clean_seen += 1
+        if clean_seen >= best:
+            tail = curr[i + 1:]
+            # Strip leading punctuation left over from the removed overlap
+            while tail and tail[0] in _PUNC_CHARS:
+                tail = tail[1:]
+            return tail
+
+    return curr
+
+
 def _make_result_handler(output_method: str, append_newline: bool, worker):
+    prev_text = ""
+
     def _handle_result(result: TranscriptionResult) -> None:
+        nonlocal prev_text
+
         if result.error:
             logger.error("转写失败: %s", result.error)
             return
@@ -473,10 +603,14 @@ def _make_result_handler(output_method: str, append_newline: bool, worker):
         # 获取转录统计信息
         stats = worker.transcription_stats
 
+        # 去除与上一段重叠的前缀
+        deduped = _remove_overlap(prev_text, result.text)
+        prev_text = result.text
+
         # 构建输出文本（识别模式加说话人前缀）
-        output_text = result.text
+        output_text = deduped
         if result.speaker:
-            output_text = f"[{result.speaker}] {result.text}"
+            output_text = f"[{result.speaker}] {deduped}"
             logger.info(
                 "转写成功: [%s](%.2f) %s (推理 %.2fs) [已完成 %d/%d，队列剩余 %d]",
                 result.speaker,
@@ -496,6 +630,9 @@ def _make_result_handler(output_method: str, append_newline: bool, worker):
                 stats["submitted"],
                 stats["pending"],
             )
+
+        if deduped != result.text:
+            logger.debug("去重: '%s' → '%s'", result.text, deduped)
 
         type_text(
             output_text,
