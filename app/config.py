@@ -28,19 +28,29 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "use_gpu": False,
         "speech_threshold": 0.4,
         "smooth_window_size": 5,
-        "min_speech_frame": 8,
+        "min_speech_frame": 15,
         "max_speech_frame": 2000,
-        "min_silence_frame": 20,
+        "min_silence_frame": 50,
         "pad_start_frame": 5,
         "chunk_max_frame": 30000,
         "pre_speech_pad_ms": 300,
+        "merge_gap_ms": 800,
     },
     "asr": {
+        "backend": "local",  # "local" | "cloud"
         "use_vad": False,
         "use_punc": True,
         "language": "zh",
         "hotword": "",
         "batch_size_s": 60.0,
+    },
+    "cloud_asr": {
+        "provider": "dashscope",
+        "api_key": "",
+        "model": "paraformer-realtime-v2",
+        "format": "pcm",
+        "sample_rate": 16000,
+        "disfluency_removal": False,
     },
     "output": {
         "dedupe": True,
@@ -61,6 +71,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "incremental_learn": True,
         "incremental_margin": 0.10,
         "max_embeddings": 50,
+    },
+    "kws": {
+        "enabled": False,
+        "model_dir": "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
+        "keywords_file": "keywords.txt",
+        "score_threshold": 0.25,
+        "keywords_score": 1.0,
+        "active_timeout_s": 30,
+        "unmatched_action": "type",  # "ignore" | "type" | "hint"
     },
     "logging": {"dir": "logs", "level": "INFO"},
 }
