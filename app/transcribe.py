@@ -32,6 +32,8 @@ class TranscriptionResult:
     inference_latency: float
     confidence: float
     error: Optional[str] = None
+    speaker: Optional[str] = None
+    speaker_confidence: Optional[float] = None
 
 
 class TranscriptionWorker:
@@ -60,10 +62,18 @@ class TranscriptionWorker:
                 device=audio_cfg.get("device"),
             )
 
-        self.fun_server = FunASRServer()
-        init_result = self.fun_server.initialize()
-        if not init_result.get("success"):
-            raise RuntimeError(f"FunASR 初始化失败: {init_result}")
+        self._asr_backend = self.config.get("asr", {}).get("backend", "local")
+        self.fun_server = None
+        self.cloud_asr = None
+
+        if self._asr_backend == "cloud":
+            from .cloud_asr import CloudASR
+            self.cloud_asr = CloudASR(self.config)
+        else:
+            self.fun_server = FunASRServer()
+            init_result = self.fun_server.initialize()
+            if not init_result.get("success"):
+                raise RuntimeError(f"FunASR 初始化失败: {init_result}")
 
         self._running = threading.Event()
         self._recording = threading.Event()
@@ -378,10 +388,13 @@ class TranscriptionWorker:
         tmp_path = self._write_temp_wav(samples)
         start = time.time()
         try:
-            asr_result = self.fun_server.transcribe_audio(
-                tmp_path,
-                options=self.config.get("asr"),
-            )
+            if self._asr_backend == "cloud":
+                asr_result = self.cloud_asr.transcribe_file(tmp_path)
+            else:
+                asr_result = self.fun_server.transcribe_audio(
+                    tmp_path,
+                    options=self.config.get("asr"),
+                )
         finally:
             inference_latency = time.time() - start
             try:
