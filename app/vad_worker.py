@@ -37,6 +37,7 @@ class VadTranscriptionWorker:
         speaker_processor: Optional[object] = None,
         speaker_mode: str = "off",
         speaker_cluster: Optional[object] = None,
+        kws_enabled: bool = False,
     ) -> None:
         self.config = load_config(config_path)
         self.on_result = on_result
@@ -53,11 +54,19 @@ class VadTranscriptionWorker:
                 device=audio_cfg.get("device"),
             )
 
-        # FunASR
-        self.fun_server = FunASRServer()
-        init_result = self.fun_server.initialize()
-        if not init_result.get("success"):
-            raise RuntimeError(f"FunASR initialization failed: {init_result}")
+        # ASR 引擎（本地或云端）
+        self._asr_backend = self.config.get("asr", {}).get("backend", "local")
+        self.fun_server = None
+        self.cloud_asr = None
+
+        if self._asr_backend == "cloud":
+            from .cloud_asr import CloudASR
+            self.cloud_asr = CloudASR(self.config)
+        else:
+            self.fun_server = FunASRServer()
+            init_result = self.fun_server.initialize()
+            if not init_result.get("success"):
+                raise RuntimeError(f"FunASR initialization failed: {init_result}")
 
         # Speaker recognition (optional)
         self._speaker_processor = speaker_processor
@@ -69,8 +78,9 @@ class VadTranscriptionWorker:
         self._vad = VadProcessor(self.config)
 
         # Pre-speech rolling buffer
+        # KWS mode needs ~2s for speaker verification; normal VAD only needs 300ms
         vad_cfg = self.config.get("vad", {})
-        pre_speech_ms = vad_cfg.get("pre_speech_pad_ms", 300)
+        pre_speech_ms = 2000 if kws_enabled else vad_cfg.get("pre_speech_pad_ms", 300)
         block_ms = audio_cfg.get("block_ms", 20)
         self._pre_speech_max_frames = max(1, pre_speech_ms // block_ms)
 
@@ -79,6 +89,11 @@ class VadTranscriptionWorker:
         self._recent_frames: collections.deque = collections.deque(
             maxlen=self._pre_speech_max_frames
         )
+
+        # Merge gap: after speech_end, wait this long before submitting to ASR.
+        # If new speech starts within the gap, keep accumulating.
+        self._merge_gap_s = vad_cfg.get("merge_gap_ms", 800) / 1000.0
+        self._pending_submit_time: Optional[float] = None
 
         # State
         self._running = threading.Event()
@@ -95,6 +110,25 @@ class VadTranscriptionWorker:
         self._transcription_task_count = 0
         self._transcription_completed_count = 0
         self._audio_cfg = audio_cfg
+
+        # KWS state machine
+        self._kws_enabled = kws_enabled
+        self._kws_state = "idle"  # "idle" | "active"
+        self._active_since: float = 0.0
+        self._kws_detector = None
+        self._command_dispatcher = None
+        self._kws_active_timeout = 30
+        self._kws_unmatched = "type"
+        self._kws_continuous = False  # "开始录音"后进入持续转写，不超时
+
+        if self._kws_enabled:
+            from .kws import KwsDetector
+            from .command_dispatcher import CommandDispatcher
+            self._kws_detector = KwsDetector(self.config)
+            self._command_dispatcher = CommandDispatcher()
+            self._kws_active_timeout = self.config.get("kws", {}).get("active_timeout_s", 30)
+            self._kws_unmatched = self.config.get("kws", {}).get("unmatched_action", "type")
+            logger.info("KWS voice assistant mode enabled")
 
         self._start_transcription_worker()
 
@@ -125,8 +159,9 @@ class VadTranscriptionWorker:
             self._listen_thread.join(timeout=3)
         self._listen_thread = None
 
-        # Flush any remaining speech
-        if self._in_speech and self._speech_buffer:
+        # Flush any remaining or pending speech
+        if self._speech_buffer:
+            self._pending_submit_time = None
             self._submit_speech()
 
         self._stop_transcription_worker()
@@ -135,8 +170,11 @@ class VadTranscriptionWorker:
     def cleanup(self) -> None:
         if self._running.is_set():
             self.stop()
+        self._pending_submit_time = None
         self._speech_buffer.clear()
         self._recent_frames.clear()
+        if self._kws_detector:
+            self._kws_detector.cleanup()
         if hasattr(self, "audio"):
             self.audio.stop()
 
@@ -186,7 +224,19 @@ class VadTranscriptionWorker:
             # Maintain pre-speech rolling buffer
             self._recent_frames.append(frame)
 
-            # Feed VAD
+            # KWS mode: state machine branching
+            if self._kws_enabled:
+                if self._kws_state == "idle":
+                    self._kws_idle_process(frame)
+                    continue
+                else:
+                    # ACTIVE: check timeout (skip if continuous transcription)
+                    if not self._kws_continuous and time.time() - self._active_since > self._kws_active_timeout:
+                        logger.info("KWS: active timeout, returning to IDLE")
+                        self._kws_to_idle()
+                        continue
+
+            # Feed VAD (ACTIVE or non-KWS mode)
             results = self._vad.process_frame(frame)
 
             speech_started_this_frame = False
@@ -197,10 +247,16 @@ class VadTranscriptionWorker:
                 if result.is_speech_end and self._in_speech:
                     self._on_speech_end()
 
-            # Accumulate mic frame while in speech
+            # Accumulate mic frame while in speech or during merge gap
             # Skip if speech just started this frame (already in buffer via _recent_frames)
             if self._in_speech and not speech_started_this_frame:
                 self._speech_buffer.append(frame)
+            elif self._pending_submit_time:
+                # Keep accumulating silence during merge gap to preserve natural pauses
+                self._speech_buffer.append(frame)
+                if time.time() >= self._pending_submit_time:
+                    self._pending_submit_time = None
+                    self._submit_speech()
 
             # Safety: force-submit if speech buffer grows too large
             if self._in_speech:
@@ -211,17 +267,86 @@ class VadTranscriptionWorker:
                     self._submit_speech()
                     self._vad.reset()
 
+    # ------------------------------------------------------------------
+    # KWS state machine
+    # ------------------------------------------------------------------
+
+    def _kws_idle_process(self, frame: np.ndarray) -> None:
+        """IDLE 态：帧送 KWS 检测，命中则声纹验证。"""
+        result = self._kws_detector.feed(frame)
+        if result is None:
+            return
+
+        # 唤醒词命中 -> 声纹验证
+        if self._speaker_processor:
+            recent_audio = np.concatenate(list(self._recent_frames))
+            speaker_result = self._speaker_processor.identify(recent_audio)
+            if not speaker_result.is_known:
+                logger.info(
+                    "KWS: keyword detected but speaker verification failed (score=%.2f)",
+                    speaker_result.confidence,
+                )
+                return
+            logger.info(
+                "KWS: speaker verified: %s (score=%.2f)",
+                speaker_result.speaker_id,
+                speaker_result.confidence,
+            )
+
+        # 验证通过 -> 进入 ACTIVE
+        self._kws_to_active()
+
+    def _kws_to_active(self) -> None:
+        """切换到 ACTIVE 态。"""
+        self._kws_state = "active"
+        self._active_since = time.time()
+        self._vad.reset()
+        self._in_speech = False
+        self._speech_buffer.clear()
+        logger.info("KWS: entering ACTIVE mode")
+        try:
+            import winsound
+            threading.Thread(target=winsound.Beep, args=(1200, 200), daemon=True).start()
+        except Exception:
+            pass
+
+    def _kws_to_idle(self) -> None:
+        """切换回 IDLE 态。"""
+        self._kws_state = "idle"
+        self._kws_continuous = False
+        self._in_speech = False
+        self._pending_submit_time = None
+        self._speech_buffer.clear()
+        self._kws_detector.reset()
+        self._vad.reset()
+        logger.info("KWS: returning to IDLE mode")
+        try:
+            import winsound
+            threading.Thread(target=winsound.Beep, args=(500, 150), daemon=True).start()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Speech events
+    # ------------------------------------------------------------------
+
     def _on_speech_start(self) -> None:
         self._in_speech = True
-        # Pre-fill with recent frames before speech was detected
-        self._speech_buffer = list(self._recent_frames)
-        logger.info("VAD: speech start detected")
+        if self._pending_submit_time:
+            # Speech resumed before merge timer expired — keep accumulating
+            self._pending_submit_time = None
+            logger.info("VAD: speech resumed, merging with previous segment")
+        else:
+            # Fresh speech start
+            self._speech_buffer = list(self._recent_frames)
+            logger.info("VAD: speech start detected")
 
     def _on_speech_end(self) -> None:
         self._in_speech = False
-        self._submit_speech()
+        # Don't submit immediately; start merge timer
+        self._pending_submit_time = time.time() + self._merge_gap_s
         self._vad.reset()
-        logger.info("VAD: speech end detected")
+        logger.debug("VAD: speech end, waiting %.1fs for continuation", self._merge_gap_s)
 
     def _submit_speech(self) -> None:
         if not self._speech_buffer:
@@ -236,15 +361,7 @@ class VadTranscriptionWorker:
         speaker_id: Optional[str] = None
         speaker_confidence: Optional[float] = None
 
-        # Diarize mode: assign embedding to cluster
-        if self._speaker_mode == "diarize" and self._speaker_cluster and self._speaker_processor:
-            try:
-                embedding = self._speaker_processor.extract_embedding(combined)
-                speaker_id = self._speaker_cluster.assign(embedding)
-            except Exception as exc:
-                logger.warning("Diarize embedding extraction failed: %s", exc)
-
-        elif self._speaker_processor:
+        if self._speaker_processor:
             if self._speaker_mode == "filter":
                 ok, sid = self._speaker_processor.should_transcribe(combined)
                 if not ok:
@@ -253,8 +370,21 @@ class VadTranscriptionWorker:
                 speaker_id = sid
             elif self._speaker_mode == "identify":
                 result = self._speaker_processor.identify(combined)
-                speaker_id = result.speaker_id
-                speaker_confidence = result.confidence
+                if result.is_known:
+                    speaker_id = result.speaker_id
+                    speaker_confidence = result.confidence
+                elif self._speaker_cluster:
+                    # 未注册声纹 → 聚类分离，自动标注说话人N
+                    try:
+                        embedding = self._speaker_processor.extract_embedding(combined)
+                        speaker_id = self._speaker_cluster.assign(embedding)
+                    except Exception as exc:
+                        logger.warning("Speaker clustering failed: %s", exc)
+                        speaker_id = result.speaker_id
+                        speaker_confidence = result.confidence
+                else:
+                    speaker_id = result.speaker_id
+                    speaker_confidence = result.confidence
 
         try:
             self._transcription_queue.put_nowait(
@@ -325,9 +455,12 @@ class VadTranscriptionWorker:
         tmp_path = self._write_temp_wav(samples)
         start = time.time()
         try:
-            asr_result = self.fun_server.transcribe_audio(
-                tmp_path, options=self.config.get("asr")
-            )
+            if self._asr_backend == "cloud":
+                asr_result = self.cloud_asr.transcribe_file(tmp_path)
+            else:
+                asr_result = self.fun_server.transcribe_audio(
+                    tmp_path, options=self.config.get("asr")
+                )
         finally:
             inference_latency = time.time() - start
             try:
@@ -354,6 +487,49 @@ class VadTranscriptionWorker:
                 speaker=speaker_id,
                 speaker_confidence=speaker_confidence,
             )
+
+        # KWS command matching in ACTIVE mode
+        if (
+            self._kws_enabled
+            and self._kws_state == "active"
+            and self._command_dispatcher
+            and result.text
+        ):
+            cmd = self._command_dispatcher.match(result.text)
+            if cmd:
+                logger.info("KWS: matched command '%s' from text: %s", cmd.name, result.text)
+                if cmd.name == "exit_active":
+                    self._kws_to_idle()
+                    return
+                elif cmd.name == "start_transcribe":
+                    self._kws_continuous = True
+                    logger.info("KWS: switching to continuous transcription (say '停止录音' or '退出' to return)")
+                elif cmd.name == "stop_transcribe":
+                    if self._kws_continuous:
+                        self._kws_continuous = False
+                        logger.info("KWS: continuous transcription stopped, back to ACTIVE with timeout")
+                    else:
+                        self._kws_to_idle()
+                    return
+                # Command beep
+                try:
+                    import winsound
+                    threading.Thread(target=winsound.Beep, args=(800, 100), daemon=True).start()
+                except Exception:
+                    pass
+                self._active_since = time.time()
+                return
+            else:
+                # Unmatched
+                if self._kws_unmatched == "ignore":
+                    self._active_since = time.time()
+                    return
+                elif self._kws_unmatched == "hint":
+                    logger.info("KWS: unrecognized command: %s", result.text)
+                    self._active_since = time.time()
+                    return
+                # "type" mode: fall through to on_result
+            self._active_since = time.time()
 
         if self.on_result:
             try:
