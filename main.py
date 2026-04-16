@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 import time
@@ -440,6 +441,12 @@ def _run_vad_mode(args, config, output_method, append_newline, audio_source,
         threshold = config.get("speaker", {}).get("threshold", 0.45)
         speaker_cluster = SpeakerCluster(threshold=threshold)
 
+    # 云端模式下使用流式回调
+    asr_backend = config.get("asr", {}).get("backend", "local")
+    on_partial, on_sentence = (None, None)
+    if asr_backend == "cloud":
+        on_partial, on_sentence = _make_streaming_callbacks(output_method, append_newline)
+
     worker = VadTranscriptionWorker(
         config_path=args.config,
         on_result=None,
@@ -447,6 +454,8 @@ def _run_vad_mode(args, config, output_method, append_newline, audio_source,
         speaker_processor=speaker_processor,
         speaker_mode=speaker_mode,
         speaker_cluster=speaker_cluster,
+        on_partial=on_partial,
+        on_sentence=on_sentence,
     )
     worker.on_result = _make_result_handler(output_method, append_newline, worker)
     if args.save_dataset:
@@ -455,11 +464,16 @@ def _run_vad_mode(args, config, output_method, append_newline, audio_source,
     try:
         worker.start()
         mode_hint = "UDP" if audio_source is not None else "麦克风"
-        logger.info("VAD 自动检测模式启动（%s）", mode_hint)
+        streaming_hint = "流式" if asr_backend == "cloud" else ""
+        logger.info("VAD 自动检测模式启动（%s%s）", streaming_hint, mode_hint)
         try:
             print(f"\n{'='*50}")
-            print(f"  Vocotype 就绪 (VAD 自动检测模式, {mode_hint})")
-            print(f"  持续监听中，说话即自动转录")
+            if asr_backend == "cloud":
+                print(f"  Vocotype 就绪 (云端流式模式, {mode_hint})")
+                print(f"  持续监听中，边说边出字")
+            else:
+                print(f"  Vocotype 就绪 (VAD 自动检测模式, {mode_hint})")
+                print(f"  持续监听中，说话即自动转录")
             print(f"  按 Ctrl+C 退出")
             print(f"{'='*50}\n")
         except Exception:
@@ -501,6 +515,12 @@ def _run_kws_mode(args, config, output_method, append_newline, audio_source,
         threshold = config.get("speaker", {}).get("threshold", 0.45)
         speaker_cluster = SpeakerCluster(threshold=threshold)
 
+    # 云端模式下使用流式回调
+    asr_backend = config.get("asr", {}).get("backend", "local")
+    on_partial, on_sentence = (None, None)
+    if asr_backend == "cloud":
+        on_partial, on_sentence = _make_streaming_callbacks(output_method, append_newline)
+
     worker = VadTranscriptionWorker(
         config_path=args.config,
         on_result=None,
@@ -509,6 +529,8 @@ def _run_kws_mode(args, config, output_method, append_newline, audio_source,
         speaker_mode=speaker_mode,
         speaker_cluster=speaker_cluster,
         kws_enabled=True,
+        on_partial=on_partial,
+        on_sentence=on_sentence,
     )
     worker.on_result = _make_result_handler(output_method, append_newline, worker)
     if args.save_dataset:
@@ -545,6 +567,49 @@ def _run_kws_mode(args, config, output_method, append_newline, audio_source,
             logger.debug("清理 FunASR 服务器时出错: %s", exc)
         logger.info("所有资源已清理，正常退出")
         sys.exit(0)
+
+
+# ------------------------------------------------------------------
+# 流式 ASR 终端实时显示
+# ------------------------------------------------------------------
+
+def _make_streaming_callbacks(output_method: str, append_newline: bool):
+    """为云端流式 ASR 创建 on_partial / on_sentence 回调。
+
+    中间结果用 \\r 覆盖当前行，最终结果换行确认。
+    最终结果同时通过 type_text() 输出到焦点窗口。
+    """
+    last_partial_len = [0]  # mutable container for nonlocal access
+
+    def on_partial(text: str) -> None:
+        # 获取终端宽度，截断过长的中间结果
+        try:
+            cols = os.get_terminal_size().columns
+        except OSError:
+            cols = 80
+        display = text[:cols - 1]
+        # 用空格覆盖上一次残留字符
+        padding = max(0, last_partial_len[0] - len(display))
+        sys.stdout.write(f"\r{display}{' ' * padding}")
+        sys.stdout.flush()
+        last_partial_len[0] = len(display)
+
+    def on_sentence(text: str) -> None:
+        # 覆盖中间结果行并换行确认
+        try:
+            cols = os.get_terminal_size().columns
+        except OSError:
+            cols = 80
+        padding = max(0, last_partial_len[0] - len(text))
+        sys.stdout.write(f"\r{text}{' ' * padding}\n")
+        sys.stdout.flush()
+        last_partial_len[0] = 0
+
+        # 同时输出到焦点窗口
+        if text.strip():
+            type_text(text, append_newline=append_newline, method=output_method)
+
+    return on_partial, on_sentence
 
 
 _PUNC_CHARS = set("，。！？、；：""''（）【】《》—…· ,.!?;:")

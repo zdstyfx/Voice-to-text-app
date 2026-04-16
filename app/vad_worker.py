@@ -38,6 +38,8 @@ class VadTranscriptionWorker:
         speaker_mode: str = "off",
         speaker_cluster: Optional[object] = None,
         kws_enabled: bool = False,
+        on_partial: Optional[Callable[[str], None]] = None,
+        on_sentence: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.config = load_config(config_path)
         self.on_result = on_result
@@ -58,6 +60,11 @@ class VadTranscriptionWorker:
         self._asr_backend = self.config.get("asr", {}).get("backend", "local")
         self.fun_server = None
         self.cloud_asr = None
+
+        # 云端流式回调
+        self._on_partial = on_partial
+        self._on_sentence = on_sentence
+        self._cloud_streaming = self._asr_backend == "cloud" and on_partial is not None
 
         if self._asr_backend == "cloud":
             from .cloud_asr import CloudASR
@@ -142,11 +149,22 @@ class VadTranscriptionWorker:
             return
         self._running.set()
         self.audio.start()
+
+        # 云端流式模式：建立 WebSocket 连接（KWS 模式下延迟到 active 态建连）
+        if self._cloud_streaming and not self._kws_enabled:
+            try:
+                self.cloud_asr.start_streaming(self._on_partial, self._on_sentence)
+            except Exception as e:
+                logger.error("云端流式 ASR 启动失败: %s", e)
+                self._running.clear()
+                self.audio.stop()
+                raise
+
         self._listen_thread = threading.Thread(
             target=self._listen_loop, daemon=True, name="VadListenLoop"
         )
         self._listen_thread.start()
-        logger.info("VAD auto-detect mode started")
+        logger.info("VAD auto-detect mode started (streaming=%s)", self._cloud_streaming)
 
     def stop(self) -> None:
         if not self._running.is_set():
@@ -158,6 +176,13 @@ class VadTranscriptionWorker:
         if self._listen_thread and self._listen_thread.is_alive():
             self._listen_thread.join(timeout=3)
         self._listen_thread = None
+
+        # 云端流式模式：关闭 WebSocket 连接
+        if self._cloud_streaming and self.cloud_asr:
+            try:
+                self.cloud_asr.stop_streaming()
+            except Exception as e:
+                logger.warning("关闭云端流式 ASR 异常: %s", e)
 
         # Flush any remaining or pending speech
         if self._speech_buffer:
@@ -209,6 +234,61 @@ class VadTranscriptionWorker:
     # ------------------------------------------------------------------
 
     def _listen_loop(self) -> None:
+        if self._cloud_streaming:
+            self._listen_loop_streaming()
+        else:
+            self._listen_loop_vad()
+
+    def _listen_loop_streaming(self) -> None:
+        """云端流式模式：直接将音频帧送入 DashScope，跳过 VAD 分段。"""
+        queue_obj = self.audio.queue
+        # KWS 模式下延迟建连（idle 不送帧会触发 23s 超时断线）
+        streaming_active = not self._kws_enabled
+
+        while self._running.is_set():
+            try:
+                frame = queue_obj.get(timeout=0.2)
+            except Exception:
+                if not self._running.is_set():
+                    break
+                continue
+
+            if not isinstance(frame, np.ndarray):
+                frame = np.frombuffer(frame, dtype=np.int16)
+
+            # KWS 模式下仍需状态机控制
+            if self._kws_enabled:
+                if self._kws_state == "idle":
+                    self._recent_frames.append(frame)
+                    # idle → active 切换时建连
+                    if streaming_active:
+                        try:
+                            self.cloud_asr.stop_streaming()
+                        except Exception:
+                            pass
+                        streaming_active = False
+                    self._kws_idle_process(frame)
+                    continue
+                else:
+                    if not self._kws_continuous and time.time() - self._active_since > self._kws_active_timeout:
+                        logger.info("KWS: active timeout, returning to IDLE")
+                        self._kws_to_idle()
+                        continue
+                    # active 态但还没建连：建连
+                    if not streaming_active:
+                        try:
+                            self.cloud_asr.start_streaming(self._on_partial, self._on_sentence)
+                            streaming_active = True
+                        except Exception as e:
+                            logger.error("KWS active: 流式 ASR 建连失败: %s", e)
+                            continue
+
+            # 直接送帧，DashScope 服务端处理 VAD 和断句
+            if streaming_active:
+                self.cloud_asr.send_frame(frame.tobytes())
+
+    def _listen_loop_vad(self) -> None:
+        """本地 VAD 分段模式（本地 FunASR 或云端批处理）。"""
         queue_obj = self.audio.queue
         while self._running.is_set():
             try:

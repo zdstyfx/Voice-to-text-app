@@ -62,7 +62,13 @@ def _setup_dashscope_mocks():
 
     MockRecognition = MagicMock()
     mock_asr.Recognition = MockRecognition
-    mock_asr.RecognitionCallback = type("RecognitionCallback", (), {})
+    mock_asr.RecognitionCallback = type("RecognitionCallback", (), {
+        "on_open": lambda self: None,
+        "on_complete": lambda self: None,
+        "on_error": lambda self, result: None,
+        "on_close": lambda self: None,
+        "on_event": lambda self, result: None,
+    })
     mock_asr.RecognitionResult = MagicMock()
     mock_asr.RecognitionResult.is_sentence_end = staticmethod(lambda s: True)
 
@@ -81,6 +87,8 @@ def _setup_dashscope_mocks():
 class TestTranscribeFile:
     def test_result_format_on_success(self, tmp_path):
         """验证成功时返回字典包含所有必要字段。"""
+        from http import HTTPStatus
+
         cfg = _base_config(api_key="sk-test")
         asr = CloudASR(cfg)
 
@@ -88,15 +96,11 @@ class TestTranscribeFile:
         modules, MockRecognition = _setup_dashscope_mocks()
         instance = MockRecognition.return_value
 
-        def fake_call(file, **kwargs):
-            # 获取 Recognition() 构造时传入的 callback
-            callback = MockRecognition.call_args[1]["callback"]
-            mock_result = MagicMock()
-            mock_result.get_sentence.return_value = fake_sentence
-            callback.on_event(mock_result)
-            callback.on_complete()
-
-        instance.call.side_effect = fake_call
+        # transcribe_file() 使用同步 call()，直接返回 RecognitionResult
+        mock_result = MagicMock()
+        mock_result.status_code = HTTPStatus.OK
+        mock_result.get_sentence.return_value = [fake_sentence]
+        instance.call.return_value = mock_result
 
         wav_file = tmp_path / "test.wav"
         wav_file.write_bytes(b"\x00" * 100)
