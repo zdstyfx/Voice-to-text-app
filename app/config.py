@@ -100,7 +100,13 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
 
     config = dict(DEFAULT_CONFIG)
     if not path:
-        return config
+        # 自动检测项目根目录的 config.json
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        auto_path = os.path.join(project_root, "config.json")
+        if os.path.exists(auto_path):
+            path = auto_path
+        else:
+            return config
 
     expanded_path = os.path.expanduser(path)
     if not os.path.exists(expanded_path):

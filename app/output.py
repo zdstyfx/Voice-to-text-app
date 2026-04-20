@@ -28,6 +28,17 @@ else:  # Fallback for Python builds lacking ULONG_PTR in wintypes
         ULONG_PTR = ctypes.c_uint32
 
 
+class MouseInput(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
 class KeyboardInput(ctypes.Structure):
     _fields_ = [
         ("wVk", wintypes.WORD),
@@ -38,8 +49,16 @@ class KeyboardInput(ctypes.Structure):
     ]
 
 
+class HardwareInput(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
 class InputUnion(ctypes.Union):
-    _fields_ = [("ki", KeyboardInput)]
+    _fields_ = [("mi", MouseInput), ("ki", KeyboardInput), ("hi", HardwareInput)]
 
 
 class INPUT(ctypes.Structure):
@@ -98,7 +117,7 @@ def type_text(text: str, append_newline: bool = False, method: str = "auto") -> 
     elif method == "unicode":
         order = ["unicode"]
     else:
-        order = ["type", "clipboard", "unicode"]
+        order = ["clipboard", "type", "unicode"]
 
     for mode in order:
         if mode == "type" and _type_with_keyboard(payload):

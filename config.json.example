@@ -1,0 +1,5 @@
+{
+  "cloud_asr": {
+    "api_key": "your-dashscope-api-key-here"
+  }
+}

@@ -179,6 +179,9 @@ class _StreamCallback:
         self._on_partial = on_partial
         self._on_sentence = on_sentence
         self._completed = threading.Event()
+        # 去重状态
+        self._last_partial_text = ""
+        self._finished_indices: set = set()
 
     def on_open(self) -> None:
         logger.debug("DashScope 流式连接已打开")
@@ -208,7 +211,21 @@ class _StreamCallback:
             text = sentence.get("text", "")
             if not text:
                 continue
-            if RecognitionResult.is_sentence_end(sentence):
+            is_end = RecognitionResult.is_sentence_end(sentence)
+            idx = sentence.get("index", sentence.get("sentence_id"))
+
+            if is_end:
+                # 跳过已完成的 sentence index（DashScope 可能重发）
+                if idx is not None and idx in self._finished_indices:
+                    logger.debug("on_event: 跳过重复 sentence_end idx=%s", idx)
+                    continue
+                if idx is not None:
+                    self._finished_indices.add(idx)
+                self._last_partial_text = ""
                 self._on_sentence(text)
             else:
+                # 跳过重复的 partial（同一文本连续到达）
+                if text == self._last_partial_text:
+                    continue
+                self._last_partial_text = text
                 self._on_partial(text)

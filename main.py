@@ -580,6 +580,7 @@ def _make_streaming_callbacks(output_method: str, append_newline: bool):
     最终结果同时通过 type_text() 输出到焦点窗口。
     """
     last_partial_len = [0]  # mutable container for nonlocal access
+    prev_sentence = [""]  # 上一句完成文本，用于去除重叠
 
     def on_partial(text: str) -> None:
         # 获取终端宽度，截断过长的中间结果
@@ -595,19 +596,27 @@ def _make_streaming_callbacks(output_method: str, append_newline: bool):
         last_partial_len[0] = len(display)
 
     def on_sentence(text: str) -> None:
+        # 去除与上一句重叠的前缀
+        deduped = _remove_overlap(prev_sentence[0], text)
+        prev_sentence[0] = text
+
+        if not deduped.strip():
+            # 完全重叠，跳过输出
+            last_partial_len[0] = 0
+            return
+
         # 覆盖中间结果行并换行确认
         try:
             cols = os.get_terminal_size().columns
         except OSError:
             cols = 80
-        padding = max(0, last_partial_len[0] - len(text))
-        sys.stdout.write(f"\r{text}{' ' * padding}\n")
+        padding = max(0, last_partial_len[0] - len(deduped))
+        sys.stdout.write(f"\r{deduped}{' ' * padding}\n")
         sys.stdout.flush()
         last_partial_len[0] = 0
 
         # 同时输出到焦点窗口
-        if text.strip():
-            type_text(text, append_newline=append_newline, method=output_method)
+        type_text(deduped, append_newline=append_newline, method=output_method)
 
     return on_partial, on_sentence
 
@@ -615,7 +624,7 @@ def _make_streaming_callbacks(output_method: str, append_newline: bool):
 _PUNC_CHARS = set("，。！？、；：""''（）【】《》—…· ,.!?;:")
 
 
-def _remove_overlap(prev: str, curr: str, max_overlap: int = 25) -> str:
+def _remove_overlap(prev: str, curr: str, max_overlap: int = 120) -> str:
     """Remove overlapping prefix of *curr* that duplicates suffix of *prev*.
 
     Comparison ignores punctuation so that the same words with different
@@ -629,6 +638,10 @@ def _remove_overlap(prev: str, curr: str, max_overlap: int = 25) -> str:
 
     if not prev_clean or not curr_clean:
         return curr
+
+    # 完整子串检测：curr 整体已包含在 prev 中则视为纯重复
+    if curr_clean in prev_clean:
+        return ""
 
     max_check = min(len(prev_clean), len(curr_clean), max_overlap)
     best = 0

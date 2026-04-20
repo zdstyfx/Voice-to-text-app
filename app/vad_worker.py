@@ -277,7 +277,12 @@ class VadTranscriptionWorker:
                     # active 态但还没建连：建连
                     if not streaming_active:
                         try:
-                            self.cloud_asr.start_streaming(self._on_partial, self._on_sentence)
+                            # 包装 on_sentence：每次收到最终结果时刷新超时计时器
+                            def _kws_on_sentence(text, _orig=self._on_sentence):
+                                self._active_since = time.time()
+                                if _orig:
+                                    _orig(text)
+                            self.cloud_asr.start_streaming(self._on_partial, _kws_on_sentence)
                             streaming_active = True
                         except Exception as e:
                             logger.error("KWS active: 流式 ASR 建连失败: %s", e)
