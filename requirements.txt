@@ -1,20 +1,45 @@
-# Web UI (FastAPI)
+# ============================================================
+# Shokz Type - 依赖清单
+# 安装: pip install -r requirements.txt
+# ============================================================
+
+# --- Web 服务 ---
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 httpx>=0.25.0
 
+# --- 音频采集与处理 ---
 sounddevice==0.5.2
-keyboard==0.13.5
-pyperclip==1.11.0
-librosa==0.11.0
 soundfile==0.13.1
+librosa==0.11.0
+
+# --- 本地 ASR (FunASR ONNX) ---
 funasr_onnx==0.4.1
 jieba==0.42.1
-
-# Optional backends for model downloading (recommended)
-# 选其一或都装：用于 AutoModel 拉取/缓存模型
 modelscope==1.30.0
 
-# 说明：
-# - 切换为 ONNX 路线（onnxruntime）；如需 GPU/PyTorch，请安装 torch(+cu) 与 torchaudio。
+# --- 声纹识别 (CAM++ 模型，需要 PyTorch) ---
+torch>=2.0.0
+torchaudio>=2.0.0
+addict
 
+# --- VAD 语音活动检测 ---
+fireredvad
+
+# --- KWS 关键词唤醒 ---
+sherpa-onnx>=1.10.0
+
+# --- 系统交互 ---
+keyboard==0.13.5
+pyperclip==1.11.0
+
+# --- 可选：云端 ASR (DashScope) ---
+# dashscope
+
+# ============================================================
+# 说明：
+# - 默认安装 PyTorch CPU 版本。如需 GPU 加速：
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+# - dashscope 为云端 ASR 可选依赖，不使用云端识别可不装
+# - 首次运行会自动下载模型（FunASR ~500MB, CAM++ ~27MB, FireRedVAD ~10MB）
+# ============================================================
