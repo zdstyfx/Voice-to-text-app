@@ -89,8 +89,8 @@ def delete_profile(name: str) -> bool:
     return False
 
 
-async def enroll_step(name: str, step: int, audio_data: bytes) -> dict[str, Any]:
-    """执行一步声纹录制。"""
+async def enroll_step(name: str, step: int, audio_data) -> dict[str, Any]:
+    """执行一步声纹录制。audio_data 可以是 np.ndarray (int16) 或 bytes。"""
     if _speaker_processor is None:
         return {"success": False, "step": step, "total": TOTAL_STEPS,
                 "quality_score": 0, "message": "声纹模块未初始化"}
@@ -99,23 +99,12 @@ async def enroll_step(name: str, step: int, audio_data: bytes) -> dict[str, Any]
                 "quality_score": 0, "message": f"步骤范围 1-{TOTAL_STEPS}"}
 
     try:
-        # audio_data 可能是 webm/ogg 格式，用 soundfile 解码为 int16
-        import io
-        import soundfile as sf
-        try:
-            audio_float, sr = sf.read(io.BytesIO(audio_data), dtype='float32')
-            # 转 mono
-            if len(audio_float.shape) > 1:
-                audio_float = audio_float.mean(axis=1)
-            # 重采样到 16kHz
-            if sr != 16000:
-                import librosa
-                audio_float = librosa.resample(audio_float, orig_sr=sr, target_sr=16000)
-            audio_int16 = (audio_float * 32767).astype(np.int16)
-        except Exception:
-            # 降级：尝试作为 raw PCM int16
+        if isinstance(audio_data, np.ndarray):
+            audio_int16 = audio_data.astype(np.int16) if audio_data.dtype != np.int16 else audio_data
+        else:
             audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
 
+        logger.info("声纹录入: 音频长度=%d 样本 (%.2f 秒)", len(audio_int16), len(audio_int16) / 16000)
         embedding = _speaker_processor.extract_embedding(audio_int16)
         _speaker_db.enroll(name, embedding)
         _speaker_db.save()

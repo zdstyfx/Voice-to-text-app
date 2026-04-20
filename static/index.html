@@ -690,9 +690,9 @@ let _enrollRecording = false;
 async function doEnrollStep() {
   const btn = document.getElementById('enroll-btn');
 
-  // 如果正在录制，点击 = 提前结束
+  // 如果正在录制，点击 = 提前结束（通知后端停止）
   if (_enrollRecording) {
-    stopRecording();
+    api('/api/voiceprint/enroll/stop', 'POST');
     return;
   }
 
@@ -712,16 +712,11 @@ async function doEnrollStep() {
       fill.style.width = '100%';
     });
 
-    const audioBase64 = await recordAudio(5000);
+    // 后端麦克风录音（5秒，与 ASR 同源保证声纹一致）
+    const step = state.enrollStep + 1;
+    const resp = await api(`/api/voiceprint/profiles/${state.enrollProfileId}/enroll?step=${step}&duration=5`, 'POST', {});
     _enrollRecording = false;
     bar.style.display = 'none';
-    btn.disabled = true;
-
-    document.getElementById('enroll-status').textContent = '上传中...';
-    const step = state.enrollStep + 1;
-    const resp = await api(`/api/voiceprint/profiles/${state.enrollProfileId}/enroll`, 'POST', {
-      step, audio_base64: audioBase64,
-    });
 
     if (resp.success) {
       state.enrollStep = step;
