@@ -42,7 +42,7 @@ class CommandDispatcher:
         )
         self.register(
             "exit_active",
-            ["退出", "取消", "再见", "exit", "cancel"],
+            ["退出", "取消", "再见", "结束", "exit", "cancel"],
             lambda ctx: None,
         )
 
