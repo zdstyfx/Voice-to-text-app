@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.speaker_cluster import SpeakerCluster
+from shokztype.core.speaker_cluster import SpeakerCluster
 
 
 def test_submit_speech_unknown_speaker_clusters():
     """In identify mode, unknown speakers should fall through to SpeakerCluster."""
-    from app.vad_worker import VadTranscriptionWorker
+    from shokztype.core.vad_worker import VadTranscriptionWorker
 
     mock_proc = MagicMock()
     emb = np.random.randn(192).astype(np.float32)
@@ -47,7 +47,7 @@ def test_submit_speech_unknown_speaker_clusters():
 
 def test_submit_speech_known_speaker_uses_name():
     """In identify mode, known speakers should use their registered name."""
-    from app.vad_worker import VadTranscriptionWorker
+    from shokztype.core.vad_worker import VadTranscriptionWorker
 
     mock_proc = MagicMock()
     mock_result = MagicMock()
@@ -81,7 +81,7 @@ def test_submit_speech_known_speaker_uses_name():
 
 def test_submit_speech_clustering_failure_falls_back():
     """If clustering fails for unknown speaker, fall back to identify result."""
-    from app.vad_worker import VadTranscriptionWorker
+    from shokztype.core.vad_worker import VadTranscriptionWorker
 
     mock_proc = MagicMock()
     mock_proc.extract_embedding.side_effect = RuntimeError("too short")

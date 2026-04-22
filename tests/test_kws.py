@@ -5,7 +5,7 @@ import pytest
 
 def test_kws_detector_init_and_silence():
     """KwsDetector 初始化并 feed 静音帧不触发检测"""
-    from app.kws import KwsDetector
+    from shokztype.core.kws import KwsDetector
 
     config = {
         "kws": {
@@ -24,7 +24,7 @@ def test_kws_detector_init_and_silence():
 
 def test_kws_detector_accepts_int16():
     """KwsDetector 能接受 int16 格式音频"""
-    from app.kws import KwsDetector
+    from shokztype.core.kws import KwsDetector
 
     config = {
         "kws": {
@@ -42,7 +42,7 @@ def test_kws_detector_accepts_int16():
 
 def test_kws_detector_reset():
     """reset 后 detector 仍可正常工作"""
-    from app.kws import KwsDetector
+    from shokztype.core.kws import KwsDetector
 
     config = {
         "kws": {

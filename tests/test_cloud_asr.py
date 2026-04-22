@@ -6,7 +6,7 @@ import types
 import pytest
 from unittest.mock import patch, MagicMock
 
-from app.cloud_asr import CloudASR
+from shokztype.core.cloud_asr import CloudASR
 
 
 def _base_config(**overrides):

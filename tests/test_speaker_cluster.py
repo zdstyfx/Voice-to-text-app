@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from app.speaker_cluster import SpeakerCluster
+from shokztype.core.speaker_cluster import SpeakerCluster
 
 
 def _random_embedding(seed: int) -> np.ndarray:

@@ -5,14 +5,14 @@ import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.speaker import SpeakerProcessor, SpeakerResult
+from shokztype.core.speaker import SpeakerProcessor, SpeakerResult
 
 
 class FakeSpeakerProcessor:
     """Minimal stand-in that avoids loading the real CAM++ model."""
 
     def __init__(self, config):
-        from app.speaker_db import SpeakerDB
+        from shokztype.core.speaker_db import SpeakerDB
         spk_cfg = config.get("speaker", {})
         self._threshold = spk_cfg.get("threshold", 0.45)
         self._whitelist = set(spk_cfg.get("whitelist", []))

@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shokz Type</title>
+<style>
+:root {
+  --bg: #f0f2f5;
+  --paper: #ffffff;
+  --ink: #1a1a2e;
+  --ink2: #7c7c8a;
+  --ink3: #b0b0be;
+  --accent: #4f46e5;
+  --accent2: #4338ca;
+  --accent-light: #eef2ff;
+  --ok: #10b981;
+  --ok-light: #ecfdf5;
+  --warn: #f59e0b;
+  --warn-light: #fffbeb;
+  --danger: #ef4444;
+  --danger-light: #fef2f2;
+  --border: #e5e7eb;
+  --radius: 14px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+  --shadow: 0 4px 16px rgba(0,0,0,.06);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; }
+
+/* Header */
+.header { background: linear-gradient(135deg, #4f46e5 0%, #6d28d9 50%, #7c3aed 100%); padding: 36px 16px 52px; text-align: center; position: relative; overflow: hidden; }
+.header::before { content: ""; position: absolute; top: -60%; right: -20%; width: 300px; height: 300px; background: rgba(255,255,255,.06); border-radius: 50%; }
+.header::after { content: ""; position: absolute; bottom: -40%; left: -10%; width: 200px; height: 200px; background: rgba(255,255,255,.04); border-radius: 50%; }
+.header h1 { font-size: 28px; font-weight: 800; color: #fff; letter-spacing: 2px; margin-bottom: 6px; text-shadow: 0 2px 8px rgba(0,0,0,.15); }
+.header .subtitle { color: rgba(255,255,255,.7); font-size: 13px; margin: 0; letter-spacing: .5px; }
+
+
+.container { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+
+/* Nav */
+.nav { display: flex; justify-content: center; gap: 8px; margin: 20px 0 24px; }
+.nav-btn { padding: 8px 24px; border: none; border-radius: 20px; background: var(--paper); cursor: pointer; font-size: 13px; font-weight: 500; color: var(--ink2); transition: all .2s; box-shadow: var(--shadow-sm); }
+.nav-btn:hover { color: var(--accent); }
+.nav-btn.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(79,70,229,.3); }
+
+/* Mode cards */
+.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 24px 0; }
+.mode-card { background: var(--paper); border: 2px solid transparent; border-radius: var(--radius); padding: 32px 16px 24px; text-align: center; cursor: pointer; transition: all .3s cubic-bezier(.4,0,.2,1); box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
+.mode-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: transparent; transition: background .3s; }
+.mode-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(79,70,229,.12); }
+.mode-card:hover::before { background: linear-gradient(90deg, var(--accent), #7c3aed); }
+.mode-card.active { border-color: var(--accent); background: var(--accent-light); }
+.mode-card.active::before { background: linear-gradient(90deg, var(--accent), #7c3aed); height: 4px; }
+.mode-card .icon { font-size: 40px; margin-bottom: 12px; transition: transform .3s; }
+.mode-card:hover .icon { transform: scale(1.1); }
+.mode-card.active .icon { transform: scale(1.1); }
+.mode-card .name { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--ink); }
+.mode-card.active .name { color: var(--accent); }
+.mode-card .desc { font-size: 11px; color: var(--ink2); line-height: 1.5; }
+
+/* Settings sections */
+.section { background: var(--paper); border-radius: var(--radius); margin-bottom: 12px; box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+.section summary { padding: 14px 20px; font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; color: var(--ink); }
+.section summary::after { content: "\25B8"; font-size: 14px; color: var(--ink3); transition: transform .2s; }
+.section[open] summary::after { transform: rotate(90deg); color: var(--accent); }
+.section[open] summary { border-bottom: 1px solid var(--border); }
+.section-body { padding: 16px 20px 20px; }
+
+/* Forms */
+label { display: block; font-size: 12px; font-weight: 500; color: var(--ink2); margin-bottom: 4px; margin-top: 14px; text-transform: uppercase; letter-spacing: .3px; }
+label:first-child { margin-top: 0; }
+input[type="text"], input[type="password"], input[type="number"], select, textarea {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--bg); outline: none; transition: all .2s; color: var(--ink);
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 13px; line-height: 1.5; }
+.row { display: flex; gap: 12px; }
+.row > * { flex: 1; }
+
+/* Buttons */
+.btn { padding: 9px 18px; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .2s; }
+.btn:active { transform: scale(.97); }
+.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 1px 3px rgba(79,70,229,.3); }
+.btn-primary:hover { background: var(--accent2); box-shadow: 0 2px 8px rgba(79,70,229,.35); }
+.btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); font-size: 12px; }
+.btn-danger:hover { background: var(--danger-light); }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--ink2); }
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+
+/* Toggle */
+.toggle { display: flex; align-items: center; gap: 10px; }
+.toggle span { font-size: 14px; font-weight: 500; }
+.toggle input[type="checkbox"] { width: 44px; height: 24px; appearance: none; background: var(--border); border-radius: 12px; position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; }
+.toggle input[type="checkbox"]::after { content: ""; width: 20px; height: 20px; background: #fff; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.toggle input[type="checkbox"]:checked { background: var(--ok); }
+.toggle input[type="checkbox"]:checked::after { transform: translateX(20px); }
+
+/* Voiceprint */
+.profile-list { list-style: none; }
+.profile-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin: 4px 0; border-radius: 8px; background: var(--bg); transition: background .15s; }
+.profile-item:hover { background: #e8eaed; }
+.profile-info { display: flex; align-items: center; gap: 8px; }
+.profile-check { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+
+/* Enrollment */
+.enroll-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(4px); z-index: 100; align-items: center; justify-content: center; }
+.enroll-modal.show { display: flex; }
+.enroll-box { background: var(--paper); border-radius: 20px; padding: 36px 32px 28px; width: 420px; max-width: 90vw; text-align: center; box-shadow: var(--shadow-lg); }
+.enroll-box h3 { font-size: 18px; color: var(--ink); }
+.progress-ring { width: 110px; height: 110px; margin: 20px auto 16px; position: relative; }
+.progress-ring svg { transform: rotate(-90deg); }
+.progress-ring circle { fill: none; stroke-width: 7; }
+.progress-ring .bg { stroke: var(--border); }
+.progress-ring .fg { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
+.progress-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: var(--accent); }
+.enroll-sentence { font-size: 15px; margin: 12px 0; padding: 14px 16px; background: var(--accent-light); border-radius: 10px; min-height: 48px; color: var(--ink); line-height: 1.5; border: 1px solid rgba(79,70,229,.1); }
+.enroll-status { font-size: 13px; color: var(--ink2); margin-bottom: 16px; min-height: 18px; }
+
+/* Hotkey */
+.hotkey-display { display: inline-flex; align-items: center; gap: 4px; padding: 10px 20px; background: var(--bg); border: 2px solid var(--border); border-radius: 10px; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 15px; font-weight: 600; min-width: 120px; justify-content: center; cursor: pointer; transition: all .2s; color: var(--ink); }
+.hotkey-display:hover { border-color: var(--accent); background: var(--accent-light); }
+.hotkey-display.recording { border-color: var(--danger); background: var(--danger-light); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
+
+/* Toast */
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(10px); padding: 12px 24px; background: var(--ink); color: #fff; border-radius: 10px; font-size: 13px; z-index: 200; opacity: 0; transition: all .3s; box-shadow: var(--shadow-lg); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Radio group */
+.radio-group { display: flex; gap: 16px; margin-top: 8px; }
+.radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--ink); margin: 0; font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+/* Keyword tags */
+.kw-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 3px; background: var(--accent-light); border: 1px solid rgba(79,70,229,.15); border-radius: 6px; font-size: 13px; color: var(--accent); }
+.kw-tag .remove { cursor: pointer; color: var(--danger); font-weight: bold; margin-left: 2px; }
+.kw-tag .remove:hover { color: #dc2626; }
+
+/* Settings button */
+.settings-btn { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,.15); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; }
+.settings-btn:hover { background: rgba(255,255,255,.25); transform: rotate(45deg); }
+.settings-btn.active { background: rgba(255,255,255,.3); }
+
+/* Settings page header */
+.settings-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.back-btn { background: var(--accent-light); border: none; cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 7px 14px; border-radius: 8px; transition: all .2s; }
+.back-btn:hover { background: var(--accent); color: #fff; }
+.settings-title { font-size: 18px; font-weight: 700; color: var(--ink); }
+
+/* Page transition */
+#page-main, #page-settings { animation: fadeIn .3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Section hover */
+.section { transition: box-shadow .2s; }
+.section:hover { box-shadow: var(--shadow); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--ink3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Shokz Type</h1>
+  <p class="subtitle">AI 语音输入助手</p>
+  <button class="settings-btn" onclick="showPage(state.page==='settings'?'main':'settings')" id="settings-btn" title="设置">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>
+    </svg>
+  </button>
+</div>
+
+
+<div class="container">
+
+  <!-- ===== 主页 ===== -->
+  <div id="page-main">
+    <div class="mode-grid" id="mode-grid"></div>
+  </div>
+
+  <!-- ===== 设置页 ===== -->
+  <div id="page-settings" style="display:none">
+    <div class="settings-header">
+      <button class="back-btn" onclick="showPage('main')">&#8592; 返回</button>
+      <span class="settings-title">设置</span>
+    </div>
+
+    <!-- 1. 麦克风 -->
+    <details class="section" open>
+      <summary><span>&#127908; 麦克风选择</span></summary>
+      <div class="section-body">
+        <label>当前麦克风</label>
+        <select id="mic-select"></select>
+      </div>
+    </details>
+
+    <!-- 2. ASR / LLM / Prompt -->
+    <details class="section">
+      <summary><span>&#9881; ASR / LLM / Prompt</span></summary>
+      <div class="section-body">
+        <label>ASR 后端</label>
+        <div class="radio-group">
+          <label><input type="radio" name="asr-backend" value="funasr" checked> FunASR (本地)</label>
+          <label><input type="radio" name="asr-backend" value="volcengine"> 火山引擎 (云端)</label>
+        </div>
+
+        <div id="volcengine-fields" style="display:none">
+          <label>API Key</label>
+          <input type="password" id="volc-api-key">
+          <label>Model ID</label>
+          <input type="text" id="volc-model-id">
+        </div>
+
+        <hr style="margin:16px 0;border:none;border-top:1px solid var(--bg)">
+
+        <label>LLM API Base URL</label>
+        <input type="text" id="llm-base-url" placeholder="https://api.openai.com">
+        <label>API Key</label>
+        <input type="password" id="llm-api-key">
+        <div class="row">
+          <div><label>模型</label><input type="text" id="llm-model" placeholder="gpt-4o-mini"></div>
+          <div><label>超时(秒)</label><input type="number" id="llm-timeout" value="90"></div>
+          <div><label>温度</label><input type="number" id="llm-temperature" value="0.2" step="0.1" min="0" max="2"></div>
+        </div>
+
+        <label>翻译目标语言</label>
+        <select id="target-lang">
+          <option>英语</option><option>日语</option><option>韩语</option>
+          <option>法语</option><option>德语</option><option>西班牙语</option><option>俄语</option>
+        </select>
+
+        <label>Prompt 模板 (<span id="prompt-mode-label">translate</span>)</label>
+        <textarea id="prompt-editor"></textarea>
+
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="saveSettings()">保存配置</button>
+        </div>
+      </div>
+    </details>
+
+    <!-- 3. 声纹 -->
+    <details class="section">
+      <summary><span>&#128100; 声纹设置</span></summary>
+      <div class="section-body">
+        <div class="toggle" style="margin-bottom:12px">
+          <input type="checkbox" id="vp-toggle">
+          <span>启用声纹过滤</span>
+        </div>
+        <ul class="profile-list" id="vp-profiles"></ul>
+        <button class="btn btn-outline btn-sm" onclick="startCreateProfile()" style="margin-top:8px" id="btn-add-vp">+ 添加声纹</button>
+      </div>
+    </details>
+
+    <!-- 4. 唤醒 -->
+    <details class="section">
+      <summary><span>&#128276; 唤醒设置</span></summary>
+      <div class="section-body">
+        <div class="radio-group">
+          <label><input type="radio" name="wakeup-method" value="hotkey" checked> 热键唤醒</label>
+          <label><input type="radio" name="wakeup-method" value="vad"> VAD + 关键词</label>
+        </div>
+        <div id="hotkey-section" style="margin-top:16px">
+          <label>当前热键（点击录制新热键）</label>
+          <div class="hotkey-display" id="hotkey-display" onclick="startRecordHotkey()">F2</div>
+        </div>
+        <div id="vad-section" style="display:none;margin-top:16px">
+          <label style="font-weight:600;font-size:14px">开始关键词（唤醒词）</label>
+          <p style="font-size:12px;color:var(--ink2);margin-bottom:8px">说出这些词从 IDLE 切换到 ACTIVE，开始转录</p>
+          <ul id="start-kw-list" style="list-style:none;margin-bottom:8px"></ul>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+            <input type="text" id="new-start-kw" placeholder="输入唤醒词，如：你好小韶" style="flex:1">
+            <button class="btn btn-outline btn-sm" onclick="addStartKeyword()">添加</button>
+          </div>
+
+          <label style="font-weight:600;font-size:14px;margin-top:16px">结束关键词</label>
+          <p style="font-size:12px;color:var(--ink2);margin-bottom:8px">在 ACTIVE 状态下说出这些词回到 IDLE（子串匹配，建议用不常见的短语）</p>
+          <div id="end-kw-list" style="margin-bottom:8px"></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="new-end-kw" placeholder="添加结束关键词" style="flex:1">
+            <button class="btn btn-outline btn-sm" onclick="addEndKeyword()">添加</button>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="saveWakeup()" style="margin-top:12px">保存唤醒设置</button>
+      </div>
+    </details>
+  </div>
+</div>
+
+<!-- 声纹录制弹窗 -->
+<div class="enroll-modal" id="enroll-modal">
+  <div class="enroll-box">
+    <h3 style="margin-bottom:8px">声纹录制</h3>
+    <div class="progress-ring">
+      <svg width="120" height="120">
+        <circle class="bg" cx="60" cy="60" r="52"/>
+        <circle class="fg" id="enroll-ring" cx="60" cy="60" r="52"
+          stroke-dasharray="326.7" stroke-dashoffset="326.7"/>
+      </svg>
+      <div class="progress-text" id="enroll-step-text">0/5</div>
+    </div>
+    <div class="enroll-sentence" id="enroll-sentence">准备开始...</div>
+    <div id="enroll-progress-bar" style="display:none;margin:12px 0;height:6px;background:var(--bg);border-radius:3px;overflow:hidden">
+      <div id="enroll-progress-fill" style="height:100%;background:var(--accent);width:0%;border-radius:3px;transition:width linear"></div>
+    </div>
+    <div class="enroll-status" id="enroll-status"></div>
+    <button class="btn btn-primary" id="enroll-btn" onclick="doEnrollStep()">开始录制</button>
+    <button class="btn btn-outline" onclick="closeEnrollModal()" style="margin-left:8px">取消</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+let state = {
+  page: 'main',
+  modes: [],
+  currentMode: 'translate',
+  settings: {},
+  profiles: [],
+  activeProfiles: [],
+  sentences: [],
+  enrollProfileId: null,
+  enrollStep: 0,
+  recordingHotkey: false,
+};
+
+// --- 页面切换 ---
+function showPage(page) {
+  state.page = page;
+  document.getElementById('page-main').style.display = page === 'main' ? '' : 'none';
+  document.getElementById('page-settings').style.display = page === 'settings' ? '' : 'none';
+  document.getElementById('settings-btn').classList.toggle('active', page === 'settings');
+  if (page === 'settings') loadAllSettings();
+}
+
+// --- Toast ---
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// --- API 调用 ---
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(API + path, opts);
+  return resp.json();
+}
+
+// --- 模式 ---
+async function loadModes() {
+  const data = await api('/api/modes');
+  state.modes = data.modes;
+  state.currentMode = data.currentMode;
+  renderModes();
+}
+
+function renderModes() {
+  const icons = { translate: '\uD83C\uDF10', polish: '\u2728', transcribe: '\uD83C\uDFA4' };
+  document.getElementById('mode-grid').innerHTML = state.modes.map(m => `
+    <div class="mode-card ${m.id === state.currentMode ? 'active' : ''}" onclick="setMode('${m.id}')">
+      <div class="icon">${icons[m.id] || ''}</div>
+      <div class="name">${m.name}</div>
+      <div class="desc">${m.description}</div>
+    </div>
+  `).join('');
+}
+
+async function setMode(mode) {
+  await api('/api/modes/current', 'POST', { mode });
+  state.currentMode = mode;
+  renderModes();
+  toast('已切换到 ' + state.modes.find(m => m.id === mode)?.name);
+}
+
+// --- 设置加载 ---
+async function loadAllSettings() {
+  const [settings, devices, vp, wakeup] = await Promise.all([
+    api('/api/settings'),
+    api('/api/devices'),
+    api('/api/voiceprint/profiles'),
+    api('/api/wakeup'),
+  ]);
+  state.settings = settings;
+  populateSettings(settings);
+  populateDevices(devices.devices);
+  populateVoiceprint(vp);
+  populateWakeup(wakeup);
+}
+
+function populateSettings(s) {
+  const asr = s.asr || {};
+  document.querySelectorAll('[name="asr-backend"]').forEach(r => {
+    r.checked = r.value === asr.backend;
+  });
+  toggleVolcFields();
+  const volc = asr.volcengine || {};
+  document.getElementById('volc-api-key').value = volc.api_key || '';
+  document.getElementById('volc-model-id').value = volc.model_id || '';
+
+  const llm = s.llm || {};
+  document.getElementById('llm-base-url').value = llm.apiBaseUrl || '';
+  document.getElementById('llm-api-key').value = llm.apiKey || '';
+  document.getElementById('llm-model').value = llm.model || '';
+  document.getElementById('llm-timeout').value = llm.timeoutSeconds || 90;
+  document.getElementById('llm-temperature').value = llm.temperature || 0.2;
+
+  document.getElementById('target-lang').value = s.translateTargetLanguage || '英语';
+
+  const mode = s.currentMode || 'translate';
+  document.getElementById('prompt-mode-label').textContent = mode;
+  document.getElementById('prompt-editor').value = (s.prompts || {})[mode] || '';
+}
+
+function populateDevices(devices) {
+  const sel = document.getElementById('mic-select');
+  const current = state.settings.audio?.device;
+  sel.innerHTML = devices.map(d =>
+    `<option value="${d.id}" data-eid="${d.endpoint_id || ''}" ${d.id === current || (current === null && d.is_default) ? 'selected' : ''}>${d.name}${d.is_default ? ' (默认)' : ''}</option>`
+  ).join('');
+}
+
+document.getElementById('mic-select').addEventListener('change', async function() {
+  const deviceId = this.value;
+  const endpointId = this.options[this.selectedIndex].dataset.eid || '';
+  state.settings.audio = state.settings.audio || {};
+  state.settings.audio.device = deviceId;
+  await api('/api/settings', 'POST', {
+    audio: { device: deviceId, preferred_device: endpointId },
+  });
+  toast('麦克风已切换');
+});
+
+function populateVoiceprint(vp) {
+  state.profiles = vp.profiles || [];
+  state.activeProfiles = vp.activeProfiles || [];
+  state.sentences = vp.sentences || [];
+  state.vpEnabled = vp.enabled;
+  document.getElementById('vp-toggle').checked = vp.enabled;
+  renderProfiles();
+}
+
+function renderProfiles() {
+  const el = document.getElementById('vp-profiles');
+  if (state.profiles.length === 0) {
+    el.innerHTML = '<li style="color:var(--ink2);font-size:13px;padding:8px 0">暂无声纹档案</li>';
+    document.getElementById('btn-add-vp').style.display = '';
+    return;
+  }
+  const disabled = !state.vpEnabled;
+  el.innerHTML = state.profiles.map(p => `
+    <li class="profile-item">
+      <div class="profile-info" style="${disabled ? 'opacity:.45;pointer-events:none' : ''}">
+        ${state.vpEnabled && p.enrollment_complete
+          ? `<input type="checkbox" class="profile-check" ${state.activeProfiles.includes(p.id) ? 'checked' : ''} onchange="toggleProfile('${p.id}', this.checked)">`
+          : ''
+        }
+        <span>${p.name}</span>
+        <span style="font-size:11px;color:var(--ink2);margin-left:6px">${p.enrollment_complete ? '已完成' : '未完成'}</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        ${!p.enrollment_complete ? `<button class="btn btn-sm btn-primary" onclick="resumeEnroll('${p.id}', ${p.enrollment_steps})">继续录制</button>` : ''}
+        <button class="btn btn-sm btn-danger" onclick="deleteProfile('${p.id}')">删除</button>
+      </div>
+    </li>
+  `).join('');
+  document.getElementById('btn-add-vp').style.display = state.profiles.length >= 3 ? 'none' : '';
+}
+
+function populateWakeup(w) {
+  document.querySelectorAll('[name="wakeup-method"]').forEach(r => {
+    r.checked = r.value === w.method;
+  });
+  document.getElementById('hotkey-display').textContent = w.hotkey_combo || 'F2';
+  state.startKeywords = w.start_keywords || [];
+  state.endKeywords = w.end_keywords || ['退出', '取消', '再见'];
+  renderStartKeywords();
+  renderEndKeywords();
+  toggleWakeupFields();
+}
+
+function renderStartKeywords() {
+  const el = document.getElementById('start-kw-list');
+  if (!state.startKeywords.length) {
+    el.innerHTML = '<li style="color:var(--ink2);font-size:13px;padding:4px 0">暂无唤醒词</li>';
+    return;
+  }
+  el.innerHTML = state.startKeywords.map(kw => `
+    <li style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bg)">
+      <span style="font-size:14px">${kw}</span>
+      <button class="btn btn-sm btn-danger" onclick="deleteStartKeyword('${kw}')">删除</button>
+    </li>
+  `).join('');
+}
+
+function renderEndKeywords() {
+  const el = document.getElementById('end-kw-list');
+  el.innerHTML = state.endKeywords.map((kw, i) => `
+    <span class="kw-tag">${kw}<span class="remove" onclick="removeEndKeyword(${i})">&times;</span></span>
+  `).join('');
+}
+
+function addEndKeyword() {
+  const input = document.getElementById('new-end-kw');
+  const val = input.value.trim();
+  if (!val) return;
+  if (state.endKeywords.includes(val)) { toast('已存在'); return; }
+  state.endKeywords.push(val);
+  renderEndKeywords();
+  input.value = '';
+}
+
+function removeEndKeyword(idx) {
+  state.endKeywords.splice(idx, 1);
+  renderEndKeywords();
+}
+
+async function deleteStartKeyword(name) {
+  if (!confirm('确定删除唤醒词"' + name + '"？')) return;
+  await api('/api/wakeup/start-keywords/' + encodeURIComponent(name), 'DELETE');
+  state.startKeywords = state.startKeywords.filter(k => k !== name);
+  renderStartKeywords();
+  toast('已删除');
+}
+
+async function addStartKeyword() {
+  const input = document.getElementById('new-start-kw');
+  const val = input.value.trim();
+  if (!val) return;
+  if (state.startKeywords.includes(val)) { toast('该唤醒词已存在'); return; }
+  const resp = await api('/api/wakeup/add-start-keyword', 'POST', { keyword: val });
+  if (resp.success) {
+    state.startKeywords.push(val);
+    renderStartKeywords();
+    input.value = '';
+    toast('唤醒词已添加: ' + val);
+  } else {
+    toast(resp.error || '添加失败');
+  }
+}
+
+// --- 设置保存 ---
+async function saveSettings() {
+  const backend = document.querySelector('[name="asr-backend"]:checked').value;
+  const mode = state.currentMode;
+  const prompts = { ...(state.settings.prompts || {}) };
+  prompts[mode] = document.getElementById('prompt-editor').value;
+
+  const body = {
+    asr: {
+      backend,
+      volcengine: {
+        api_key: document.getElementById('volc-api-key').value,
+        model_id: document.getElementById('volc-model-id').value,
+      },
+    },
+    llm: {
+      apiBaseUrl: document.getElementById('llm-base-url').value,
+      apiKey: document.getElementById('llm-api-key').value,
+      model: document.getElementById('llm-model').value,
+      timeoutSeconds: parseInt(document.getElementById('llm-timeout').value) || 90,
+      temperature: parseFloat(document.getElementById('llm-temperature').value) || 0.2,
+    },
+    translateTargetLanguage: document.getElementById('target-lang').value,
+    prompts,
+    audio: {
+      device: document.getElementById('mic-select').value,
+      preferred_device: document.getElementById('mic-select').options[document.getElementById('mic-select').selectedIndex].dataset.eid || '',
+    },
+  };
+  await api('/api/settings', 'POST', body);
+  toast('配置已保存');
+}
+
+// --- 声纹 ---
+document.getElementById('vp-toggle').addEventListener('change', async function() {
+  const resp = await api('/api/voiceprint/toggle', 'POST');
+  if (!resp.success) {
+    this.checked = false;
+    toast(resp.error || '操作失败');
+    return;
+  }
+  state.vpEnabled = this.checked;
+  state.activeProfiles = resp.activeProfiles || state.activeProfiles;
+  renderProfiles();
+});
+
+async function startCreateProfile() {
+  const name = prompt('输入声纹名称（如"我"、"同事A"）：');
+  if (!name) return;
+  const resp = await api('/api/voiceprint/profiles', 'POST', { name });
+  if (resp.success) {
+    state.enrollProfileId = resp.profile.id;
+    state.enrollStep = 0;
+    openEnrollModal();
+    await loadAllSettings();
+  } else {
+    toast(resp.detail || '创建失败');
+  }
+}
+
+async function deleteProfile(id) {
+  if (!confirm('确定删除该声纹？')) return;
+  const resp = await api(`/api/voiceprint/profiles/${id}`, 'DELETE');
+  if (resp.voiceprint_disabled) {
+    state.vpEnabled = false;
+    document.getElementById('vp-toggle').checked = false;
+    toast('已删除，无可用声纹档案，声纹已自动关闭');
+  } else {
+    toast('已删除');
+  }
+  // 从本地状态移除并重新渲染
+  state.profiles = state.profiles.filter(p => p.id !== id);
+  state.activeProfiles = state.activeProfiles.filter(a => a !== id);
+  renderProfiles();
+}
+
+async function toggleProfile(id, checked) {
+  let active = [...state.activeProfiles];
+  if (checked && !active.includes(id)) active.push(id);
+  if (!checked) active = active.filter(a => a !== id);
+  if (active.length === 0) {
+    toast('至少需要选择一个声纹档案');
+    renderProfileSelect();  // 恢复 checkbox 状态
+    return;
+  }
+  await api('/api/voiceprint/active', 'PUT', { profile_ids: active });
+  state.activeProfiles = active;
+}
+
+function resumeEnroll(id, step) {
+  state.enrollProfileId = id;
+  state.enrollStep = step;
+  openEnrollModal();
+}
+
+function openEnrollModal() {
+  document.getElementById('enroll-modal').classList.add('show');
+  updateEnrollUI();
+}
+
+function closeEnrollModal() {
+  document.getElementById('enroll-modal').classList.remove('show');
+  loadAllSettings();
+}
+
+function updateEnrollUI() {
+  const step = state.enrollStep;
+  const total = 5;
+  const circumference = 326.7;
+  document.getElementById('enroll-ring').style.strokeDashoffset = circumference * (1 - step / total);
+  document.getElementById('enroll-step-text').textContent = `${step}/${total}`;
+  document.getElementById('enroll-progress-bar').style.display = 'none';
+  const btn = document.getElementById('enroll-btn');
+  btn.disabled = false;
+  if (step < total) {
+    document.getElementById('enroll-sentence').textContent = state.sentences[step] || '加载中...';
+    btn.textContent = '录制本句';
+    btn.onclick = doEnrollStep;
+    document.getElementById('enroll-status').textContent = step > 0 ? `已完成 ${step} 步` : '请朗读以下文本';
+  } else {
+    document.getElementById('enroll-sentence').textContent = '全部录制完成！';
+    btn.textContent = '完成';
+    btn.onclick = closeEnrollModal;
+    document.getElementById('enroll-status').textContent = '';
+  }
+}
+
+// 录制麦克风音频，返回 base64。可通过 stopRecording() 提前结束。
+let _currentRecorder = null;
+let _stopRecordingResolve = null;
+
+function stopRecording() {
+  if (_currentRecorder && _currentRecorder.state === 'recording') {
+    _currentRecorder.stop();
+  }
+}
+
+async function recordAudio(maxDurationMs = 5000) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = new MediaRecorder(stream);
+  _currentRecorder = recorder;
+  const chunks = [];
+
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+  // 超时自动停止 或 手动调用 stopRecording()
+  const timer = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, maxDurationMs);
+
+  recorder.start();
+
+  await new Promise(resolve => { recorder.onstop = resolve; });
+  clearTimeout(timer);
+  stream.getTracks().forEach(t => t.stop());
+  _currentRecorder = null;
+
+  const blob = new Blob(chunks);
+  const arrayBuf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+let _enrollRecording = false;
+
+async function doEnrollStep() {
+  const btn = document.getElementById('enroll-btn');
+
+  // 如果正在录制，点击 = 提前结束（通知后端停止）
+  if (_enrollRecording) {
+    api('/api/voiceprint/enroll/stop', 'POST');
+    return;
+  }
+
+  _enrollRecording = true;
+  btn.textContent = '下一句 ▶';
+  document.getElementById('enroll-status').textContent = '请朗读上方文本（读完可点击"下一句"跳过）';
+
+  try {
+    // 5 秒倒计时进度条
+    const bar = document.getElementById('enroll-progress-bar');
+    const fill = document.getElementById('enroll-progress-fill');
+    bar.style.display = '';
+    fill.style.transition = 'none';
+    fill.style.width = '0%';
+    requestAnimationFrame(() => {
+      fill.style.transition = 'width 5s linear';
+      fill.style.width = '100%';
+    });
+
+    // 后端麦克风录音（5秒，与 ASR 同源保证声纹一致）
+    const step = state.enrollStep + 1;
+    const resp = await api(`/api/voiceprint/profiles/${state.enrollProfileId}/enroll?step=${step}&duration=5`, 'POST', {});
+    _enrollRecording = false;
+    bar.style.display = 'none';
+
+    if (resp.success) {
+      state.enrollStep = step;
+      updateEnrollUI();
+    } else {
+      document.getElementById('enroll-status').textContent = resp.message || '录制失败，请重试';
+      btn.disabled = false;
+      btn.textContent = '录制本句';
+    }
+  } catch (err) {
+    _enrollRecording = false;
+    document.getElementById('enroll-progress-bar').style.display = 'none';
+    document.getElementById('enroll-status').textContent = '错误: ' + err.message;
+    btn.disabled = false;
+    btn.textContent = '录制本句';
+    toast('录音失败: ' + err.message);
+  }
+}
+
+// --- 唤醒 ---
+function toggleWakeupFields() {
+  const method = document.querySelector('[name="wakeup-method"]:checked')?.value || 'hotkey';
+  document.getElementById('hotkey-section').style.display = method === 'hotkey' ? '' : 'none';
+  document.getElementById('vad-section').style.display = method === 'vad' ? '' : 'none';
+}
+document.querySelectorAll('[name="wakeup-method"]').forEach(r => r.addEventListener('change', toggleWakeupFields));
+
+function toggleVolcFields() {
+  const backend = document.querySelector('[name="asr-backend"]:checked')?.value || 'funasr';
+  document.getElementById('volcengine-fields').style.display = backend === 'volcengine' ? '' : 'none';
+}
+document.querySelectorAll('[name="asr-backend"]').forEach(r => r.addEventListener('change', toggleVolcFields));
+
+async function saveWakeup() {
+  const method = document.querySelector('[name="wakeup-method"]:checked').value;
+  await api('/api/wakeup', 'POST', {
+    method,
+    hotkey_combo: document.getElementById('hotkey-display').textContent,
+    end_keywords: state.endKeywords,
+  });
+  // 后台重启，不阻塞
+  api('/api/recording/restart', 'POST');
+  toast('正在切换，请稍候...');
+}
+
+// --- 热键录制（后端系统级监听） ---
+async function startRecordHotkey() {
+  const el = document.getElementById('hotkey-display');
+  if (state.recordingHotkey) return;
+  state.recordingHotkey = true;
+  el.classList.add('recording');
+  el.textContent = '请按下热键...';
+
+  const resp = await api('/api/wakeup/record-hotkey', 'POST');
+  el.classList.remove('recording');
+  state.recordingHotkey = false;
+
+  if (resp.success) {
+    el.textContent = resp.combo;
+    toast('热键已录制: ' + resp.combo);
+  } else {
+    el.textContent = document.getElementById('hotkey-display').dataset.prev || 'F2';
+    toast(resp.error || '录制失败');
+  }
+}
+
+// --- SSE 设备监听 ---
+function initDeviceSSE() {
+  const es = new EventSource(API + '/api/devices/stream');
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.event === 'device_switched') {
+        state.settings.audio = state.settings.audio || {};
+        state.settings.audio.device = data.new_device.id;
+        populateDevices(data.devices);
+        if (data.reason === 'preferred_reconnected') {
+          toast('偏好麦克风已重新连接: ' + data.new_device.name);
+        } else {
+          toast('麦克风已断开，已自动切换到: ' + data.new_device.name);
+        }
+      } else if (data.event === 'devices_changed') {
+        populateDevices(data.devices);
+        toast('麦克风设备列表已更新');
+      }
+    } catch {}
+  };
+}
+
+// --- 初始化 ---
+(async function init() {
+  await loadModes();
+  initDeviceSSE();
+})();
+</script>
+</body>
+</html>

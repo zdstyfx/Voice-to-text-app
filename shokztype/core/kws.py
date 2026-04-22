@@ -1,0 +1,104 @@
+"""KWS (Keyword Spotting) — sherpa-onnx 流式关键词检测封装"""
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class KwsResult:
+    keyword: str
+    timestamp: float  # 检测时刻（秒，相对于 feed 累计帧数）
+
+
+class KwsDetector:
+    """流式关键词检测器，封装 sherpa-onnx KeywordSpotter。"""
+
+    def __init__(self, config: Dict[str, Any]) -> None:
+        import sherpa_onnx
+
+        kws_cfg = config.get("kws", {})
+        model_dir = kws_cfg.get("model_dir", "")
+        keywords_file = kws_cfg.get("keywords_file", "keywords.txt")
+
+        encoder = os.path.join(model_dir, "encoder-epoch-13-avg-2-chunk-16-left-64.onnx")
+        decoder = os.path.join(model_dir, "decoder-epoch-13-avg-2-chunk-16-left-64.onnx")
+        joiner = os.path.join(model_dir, "joiner-epoch-13-avg-2-chunk-16-left-64.onnx")
+        tokens = os.path.join(model_dir, "tokens.txt")
+
+        for f in (encoder, decoder, joiner, tokens):
+            if not os.path.isfile(f):
+                raise FileNotFoundError(f"KWS model file not found: {f}")
+        if not os.path.isfile(keywords_file):
+            raise FileNotFoundError(f"Keywords file not found: {keywords_file}")
+
+        self._kws = sherpa_onnx.KeywordSpotter(
+            tokens=tokens,
+            encoder=encoder,
+            decoder=decoder,
+            joiner=joiner,
+            num_threads=2,
+            keywords_file=keywords_file,
+            provider="cpu",
+            keywords_score=kws_cfg.get("keywords_score", 1.0),
+            keywords_threshold=kws_cfg.get("score_threshold", 0.25),
+            num_trailing_blanks=kws_cfg.get("num_trailing_blanks", 1),
+            max_active_paths=4,
+        )
+        self._stream = self._kws.create_stream()
+        self._sample_rate = 16000
+        self._total_samples = 0
+        logger.info("KWS detector initialized, keywords: %s", keywords_file)
+
+    # 模型测试音频的典型 RMS（int16 → float32 后约 0.096）
+    _TARGET_RMS = 0.096
+
+    def feed(self, samples: np.ndarray) -> Optional[KwsResult]:
+        """送入音频帧，返回检测结果或 None。
+
+        Args:
+            samples: float32 归一化音频 [-1, 1]，或 int16 原始音频。
+        """
+        if samples.dtype == np.int16:
+            samples = (samples / 32768.0).astype(np.float32)
+        elif samples.dtype != np.float32:
+            samples = samples.astype(np.float32)
+
+        # 自动增益归一化：麦克风音量差异很大，统一到模型期望的 RMS 水平
+        rms = float(np.sqrt(np.mean(samples ** 2)))
+        if rms > 1e-6:
+            gain = self._TARGET_RMS / rms
+            # 限制增益倍数，避免静音时噪声爆炸
+            gain = min(gain, 50.0)
+            samples = samples * gain
+
+        self._stream.accept_waveform(self._sample_rate, samples)
+        self._total_samples += len(samples)
+
+        while self._kws.is_ready(self._stream):
+            self._kws.decode_stream(self._stream)
+            result = self._kws.get_result(self._stream)
+            if result:
+                keyword = result.strip()
+                timestamp = self._total_samples / self._sample_rate
+                logger.info("KWS detected: '%s' at %.2fs", keyword, timestamp)
+                self._kws.reset_stream(self._stream)
+                return KwsResult(keyword=keyword, timestamp=timestamp)
+
+        return None
+
+    def reset(self) -> None:
+        """重置流状态。"""
+        self._stream = self._kws.create_stream()
+        self._total_samples = 0
+
+    def cleanup(self) -> None:
+        """释放资源。"""
+        self._stream = None
+        self._kws = None

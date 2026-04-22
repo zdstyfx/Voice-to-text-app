@@ -4,7 +4,7 @@ import json
 import os
 import numpy as np
 import pytest
-from app.speaker_db import SpeakerDB
+from shokztype.core.speaker_db import SpeakerDB
 
 
 @pytest.fixture

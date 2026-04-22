@@ -1,5 +1,5 @@
 """Tests for CommandDispatcher."""
-from app.command_dispatcher import CommandDispatcher
+from shokztype.core.command_dispatcher import CommandDispatcher
 
 
 def test_match_start_transcribe():

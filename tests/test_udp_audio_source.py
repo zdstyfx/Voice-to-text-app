@@ -7,7 +7,7 @@ import time
 import numpy as np
 import pytest
 
-from app.udp_audio_source import UDPAudioSource
+from shokztype.core.udp_audio_source import UDPAudioSource
 
 
 @pytest.fixture

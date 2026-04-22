@@ -5,7 +5,7 @@ import queue
 import numpy as np
 import pytest
 
-from app.audio_source import AudioSource
+from shokztype.core.audio_source import AudioSource
 
 
 def test_cannot_instantiate_directly():
@@ -39,5 +39,5 @@ def test_concrete_subclass_can_instantiate():
 
 
 def test_audio_capture_is_audio_source():
-    from app.audio_capture import AudioCapture
+    from shokztype.core.audio_capture import AudioCapture
     assert issubclass(AudioCapture, AudioSource)

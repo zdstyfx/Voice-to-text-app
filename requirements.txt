@@ -9,6 +9,7 @@ uvicorn[standard]>=0.24.0
 httpx>=0.25.0
 
 # --- 音频采集与处理 ---
+comtypes>=1.4.0
 sounddevice==0.5.2
 soundfile==0.13.1
 librosa==0.11.0

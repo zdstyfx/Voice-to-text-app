@@ -1,4 +1,6 @@
 __pycache__/
+*.egg-info/
+.venv/
 config.json
 speaker_db.json
 _kws_input.txt
@@ -6,3 +8,4 @@ docs/
 .superpowers/
 .vscode/
 logs/
+_test_*

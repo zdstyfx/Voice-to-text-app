@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shokztype"
+version = "0.1.0"
+description = "Chinese voice-to-text for Windows"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "httpx>=0.25.0",
+    "sounddevice==0.5.2",
+    "soundfile==0.13.1",
+    "librosa==0.11.0",
+    "funasr_onnx==0.4.1",
+    "jieba==0.42.1",
+    "modelscope==1.30.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "addict",
+    "fireredvad",
+    "sherpa-onnx>=1.10.0",
+    "keyboard==0.13.5",
+    "pyperclip==1.11.0",
+]
+
+[project.scripts]
+shokztype = "shokztype.__main__:main"
+shokztype-cli = "shokztype.cli:main"
+shokztype-enroll = "shokztype.core.speaker_enroll:main"
+shokztype-kws = "shokztype.core.kws_add_keyword:main"
+
+[tool.setuptools.packages.find]
+include = ["shokztype*"]
+
+[tool.setuptools.package-data]
+"shokztype.web" = ["static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
