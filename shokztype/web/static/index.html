@@ -6,75 +6,99 @@
 <title>Shokz Type</title>
 <style>
 :root {
-  --bg: #f0f2f5;
-  --paper: #ffffff;
-  --ink: #1a1a2e;
-  --ink2: #7c7c8a;
-  --ink3: #b0b0be;
-  --accent: #4f46e5;
-  --accent2: #4338ca;
-  --accent-light: #eef2ff;
-  --ok: #10b981;
-  --ok-light: #ecfdf5;
-  --warn: #f59e0b;
-  --warn-light: #fffbeb;
+  --bg: #000;
+  --panel: #000;
+  --surface: rgba(255,255,255,.04);
+  --surface-hover: rgba(255,255,255,.08);
+  --surface-strong: rgba(255,255,255,.10);
+  --ink: #fff;
+  --ink2: rgba(255,255,255,.70);
+  --ink3: rgba(255,255,255,.40);
+  --ink4: rgba(255,255,255,.25);
+  --muted: rgba(255,255,255,.15);
+  --accent: #34d399;
   --danger: #ef4444;
-  --danger-light: #fef2f2;
-  --border: #e5e7eb;
-  --radius: 14px;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
-  --shadow: 0 4px 16px rgba(0,0,0,.06);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,.1);
+  --danger-light: rgba(239,68,68,.10);
+  --border: rgba(255,255,255,.06);
+  --border2: rgba(255,255,255,.12);
+  --radius: 10px;
+  --shadow-lg: 0 24px 80px rgba(0,0,0,.55);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 
 /* Header */
-.header { background: linear-gradient(135deg, #4f46e5 0%, #6d28d9 50%, #7c3aed 100%); padding: 36px 16px 52px; text-align: center; position: relative; overflow: hidden; }
-.header::before { content: ""; position: absolute; top: -60%; right: -20%; width: 300px; height: 300px; background: rgba(255,255,255,.06); border-radius: 50%; }
-.header::after { content: ""; position: absolute; bottom: -40%; left: -10%; width: 200px; height: 200px; background: rgba(255,255,255,.04); border-radius: 50%; }
-.header h1 { font-size: 28px; font-weight: 800; color: #fff; letter-spacing: 2px; margin-bottom: 6px; text-shadow: 0 2px 8px rgba(0,0,0,.15); }
-.header .subtitle { color: rgba(255,255,255,.7); font-size: 13px; margin: 0; letter-spacing: .5px; }
+.header {
+  width: min(100%, 420px);
+  padding: 16px 20px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--panel);
+  z-index: 20;
+}
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand-mark { font-size: 10px; font-weight: 500; color: rgba(255,255,255,.2); letter-spacing: 4px; text-transform: uppercase; }
+.brand-subtitle { display: none; }
 
+.container {
+  width: min(100%, 420px);
+  min-height: calc(100vh - 56px);
+  background: var(--panel);
+}
 
-.container { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+#page-main {
+  min-height: calc(100vh - 56px);
+  display: flex;
+  flex-direction: column;
+}
 
-/* Nav */
-.nav { display: flex; justify-content: center; gap: 8px; margin: 20px 0 24px; }
-.nav-btn { padding: 8px 24px; border: none; border-radius: 20px; background: var(--paper); cursor: pointer; font-size: 13px; font-weight: 500; color: var(--ink2); transition: all .2s; box-shadow: var(--shadow-sm); }
-.nav-btn:hover { color: var(--accent); }
-.nav-btn.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(79,70,229,.3); }
+.hero { text-align: center; padding: 24px 20px 16px; }
+.hero-kicker { display: none; }
+.hero h1 { color: #fff; font-size: 32px; font-weight: 800; line-height: 1.2; letter-spacing: 1px; }
+.hero p { color: rgba(255,255,255,.25); font-size: 12px; margin-top: 6px; letter-spacing: 1px; }
 
 /* Mode cards */
-.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 24px 0; }
-.mode-card { background: var(--paper); border: 2px solid transparent; border-radius: var(--radius); padding: 32px 16px 24px; text-align: center; cursor: pointer; transition: all .3s cubic-bezier(.4,0,.2,1); box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
-.mode-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: transparent; transition: background .3s; }
-.mode-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(79,70,229,.12); }
-.mode-card:hover::before { background: linear-gradient(90deg, var(--accent), #7c3aed); }
-.mode-card.active { border-color: var(--accent); background: var(--accent-light); }
-.mode-card.active::before { background: linear-gradient(90deg, var(--accent), #7c3aed); height: 4px; }
-.mode-card .icon { font-size: 40px; margin-bottom: 12px; transition: transform .3s; }
-.mode-card:hover .icon { transform: scale(1.1); }
-.mode-card.active .icon { transform: scale(1.1); }
-.mode-card .name { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--ink); }
-.mode-card.active .name { color: var(--accent); }
-.mode-card .desc { font-size: 11px; color: var(--ink2); line-height: 1.5; }
+.mode-spacer { flex: 1; min-height: 260px; }
+.mode-grid { display: flex; justify-content: center; gap: 8px; padding: 0 16px 20px; margin-top: auto; }
+.mode-card { padding: 10px 28px; border-radius: 24px; border: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.05); color: rgba(255,255,255,.4); font-size: 12px; font-weight: 500; cursor: pointer; transition: all .25s; letter-spacing: .5px; }
+.mode-card:hover { background: rgba(255,255,255,.08); color: rgba(255,255,255,.6); }
+.mode-card.active { background: #fff; color: #000; border-color: #fff; box-shadow: 0 4px 16px rgba(255,255,255,.1); }
+.mode-card .icon { display: none; }
+.mode-card .name { color: inherit; white-space: nowrap; }
+.mode-card .desc { display: none; }
+
+.bottom-info { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.04); }
+.info-left { font-size: 10px; color: rgba(255,255,255,.2); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.info-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.info-right { font-size: 10px; color: rgba(255,255,255,.15); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 
 /* Settings sections */
-.section { background: var(--paper); border-radius: var(--radius); margin-bottom: 12px; box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
-.section summary { padding: 14px 20px; font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; color: var(--ink); }
-.section summary::after { content: "\25B8"; font-size: 14px; color: var(--ink3); transition: transform .2s; }
+.section { border-bottom: 1px solid rgba(255,255,255,.04); }
+.section summary { padding: 14px 20px; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; color: rgba(255,255,255,.8); transition: background .15s; }
+.section summary:hover { background: rgba(255,255,255,.02); }
+.section summary::after { content: "\25B8"; font-size: 10px; color: rgba(255,255,255,.2); transition: transform .2s; }
 .section[open] summary::after { transform: rotate(90deg); color: var(--accent); }
-.section[open] summary { border-bottom: 1px solid var(--border); }
-.section-body { padding: 16px 20px 20px; }
+.section-body { padding: 0 20px 16px; }
 
 /* Forms */
-label { display: block; font-size: 12px; font-weight: 500; color: var(--ink2); margin-bottom: 4px; margin-top: 14px; text-transform: uppercase; letter-spacing: .3px; }
+label { display: block; font-size: 10px; font-weight: 500; color: rgba(255,255,255,.3); letter-spacing: .5px; text-transform: uppercase; margin-top: 12px; margin-bottom: 4px; }
 label:first-child { margin-top: 0; }
 input[type="text"], input[type="password"], input[type="number"], select, textarea {
-  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--bg); outline: none; transition: all .2s; color: var(--ink);
+  width: 100%; padding: 10px 14px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.04); color: #fff; font-size: 13px; outline: none; transition: all .2s;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+input:focus, select:focus, textarea:focus { border-color: rgba(52,211,153,.3); box-shadow: 0 0 0 2px rgba(52,211,153,.08); }
+input::placeholder, textarea::placeholder { color: rgba(255,255,255,.2); }
+select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.3)' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
 textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 13px; line-height: 1.5; }
 .row { display: flex; gap: 12px; }
 .row > * { flex: 1; }
@@ -82,33 +106,33 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
 /* Buttons */
 .btn { padding: 9px 18px; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .2s; }
 .btn:active { transform: scale(.97); }
-.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 1px 3px rgba(79,70,229,.3); }
-.btn-primary:hover { background: var(--accent2); box-shadow: 0 2px 8px rgba(79,70,229,.35); }
-.btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); font-size: 12px; }
+.btn-primary { width: 100%; padding: 12px; border-radius: 10px; background: #fff; color: #000; font-size: 13px; font-weight: 600; margin-top: 4px; letter-spacing: .5px; }
+.btn-primary:hover { background: #e5e5e5; }
+.btn-danger { background: transparent; color: rgba(239,68,68,.6); border: 1px solid transparent; font-size: 10px; }
 .btn-danger:hover { background: var(--danger-light); }
 .btn-sm { padding: 5px 12px; font-size: 12px; }
-.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--ink2); }
-.btn-outline:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.btn-outline { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); color: rgba(255,255,255,.4); }
+.btn-outline:hover { background: rgba(255,255,255,.08); color: #fff; }
 
 /* Toggle */
-.toggle { display: flex; align-items: center; gap: 10px; }
-.toggle span { font-size: 14px; font-weight: 500; }
-.toggle input[type="checkbox"] { width: 44px; height: 24px; appearance: none; background: var(--border); border-radius: 12px; position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; }
-.toggle input[type="checkbox"]::after { content: ""; width: 20px; height: 20px; background: #fff; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
-.toggle input[type="checkbox"]:checked { background: var(--ok); }
-.toggle input[type="checkbox"]:checked::after { transform: translateX(20px); }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.toggle span { font-size: 13px; font-weight: 400; color: rgba(255,255,255,.7); }
+.toggle input[type="checkbox"] { width: 40px; height: 22px; appearance: none; background: rgba(255,255,255,.1); border-radius: 11px; position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; }
+.toggle input[type="checkbox"]::after { content: ""; width: 18px; height: 18px; background: #fff; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.toggle input[type="checkbox"]:checked { background: var(--accent); }
+.toggle input[type="checkbox"]:checked::after { transform: translateX(18px); }
 
 /* Voiceprint */
 .profile-list { list-style: none; }
-.profile-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin: 4px 0; border-radius: 8px; background: var(--bg); transition: background .15s; }
-.profile-item:hover { background: #e8eaed; }
+.profile-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; margin-top: 6px; border-radius: 10px; background: rgba(255,255,255,.03); transition: background .15s; }
+.profile-item:hover { background: rgba(255,255,255,.05); }
 .profile-info { display: flex; align-items: center; gap: 8px; }
 .profile-check { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 
 /* Enrollment */
-.enroll-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(4px); z-index: 100; align-items: center; justify-content: center; }
+.enroll-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.72); backdrop-filter: blur(10px); z-index: 100; align-items: center; justify-content: center; }
 .enroll-modal.show { display: flex; }
-.enroll-box { background: var(--paper); border-radius: 20px; padding: 36px 32px 28px; width: 420px; max-width: 90vw; text-align: center; box-shadow: var(--shadow-lg); }
+.enroll-box { background: #0a0a0a; border: 1px solid var(--border2); border-radius: 16px; padding: 36px 32px 28px; width: 420px; max-width: 90vw; text-align: center; box-shadow: var(--shadow-lg); }
 .enroll-box h3 { font-size: 18px; color: var(--ink); }
 .progress-ring { width: 110px; height: 110px; margin: 20px auto 16px; position: relative; }
 .progress-ring svg { transform: rotate(-90deg); }
@@ -116,59 +140,66 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
 .progress-ring .bg { stroke: var(--border); }
 .progress-ring .fg { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
 .progress-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: var(--accent); }
-.enroll-sentence { font-size: 15px; margin: 12px 0; padding: 14px 16px; background: var(--accent-light); border-radius: 10px; min-height: 48px; color: var(--ink); line-height: 1.5; border: 1px solid rgba(79,70,229,.1); }
+.enroll-sentence { font-size: 15px; margin: 12px 0; padding: 14px 16px; background: rgba(255,255,255,.04); border-radius: 10px; min-height: 48px; color: var(--ink); line-height: 1.5; border: 1px solid rgba(255,255,255,.08); }
 .enroll-status { font-size: 13px; color: var(--ink2); margin-bottom: 16px; min-height: 18px; }
 
 /* Hotkey */
-.hotkey-display { display: inline-flex; align-items: center; gap: 4px; padding: 10px 20px; background: var(--bg); border: 2px solid var(--border); border-radius: 10px; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 15px; font-weight: 600; min-width: 120px; justify-content: center; cursor: pointer; transition: all .2s; color: var(--ink); }
-.hotkey-display:hover { border-color: var(--accent); background: var(--accent-light); }
+.hotkey-display { display: inline-flex; align-items: center; gap: 4px; padding: 10px 24px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; font-family: "SF Mono", "Cascadia Code", monospace; font-size: 14px; font-weight: 600; min-width: 120px; justify-content: center; cursor: pointer; transition: all .2s; color: rgba(255,255,255,.6); }
+.hotkey-display:hover { border-color: rgba(52,211,153,.3); color: #fff; }
 .hotkey-display.recording { border-color: var(--danger); background: var(--danger-light); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
 
 /* Toast */
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(10px); padding: 12px 24px; background: var(--ink); color: #fff; border-radius: 10px; font-size: 13px; z-index: 200; opacity: 0; transition: all .3s; box-shadow: var(--shadow-lg); }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(10px); padding: 12px 24px; background: #18181b; color: #fff; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; z-index: 200; opacity: 0; transition: all .3s; box-shadow: var(--shadow-lg); }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* Radio group */
-.radio-group { display: flex; gap: 16px; margin-top: 8px; }
-.radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--ink); margin: 0; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.radio-group { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.radio-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 7px 14px; border-radius: 8px; font-size: 11px; background: rgba(255,255,255,.04); color: rgba(255,255,255,.4); border: 1px solid rgba(255,255,255,.06); transition: all .2s; margin: 0; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.radio-group label:has(input:checked) { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.15); }
+.radio-group input { accent-color: var(--accent); }
 
 /* Keyword tags */
-.kw-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 3px; background: var(--accent-light); border: 1px solid rgba(79,70,229,.15); border-radius: 6px; font-size: 13px; color: var(--accent); }
+.kw-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; margin: 3px; background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.2); border-radius: 6px; font-size: 13px; color: var(--accent); }
 .kw-tag .remove { cursor: pointer; color: var(--danger); font-weight: bold; margin-left: 2px; }
 .kw-tag .remove:hover { color: #dc2626; }
 
 /* Settings button */
-.settings-btn { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,.15); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; }
-.settings-btn:hover { background: rgba(255,255,255,.25); transform: rotate(45deg); }
-.settings-btn.active { background: rgba(255,255,255,.3); }
+.settings-btn { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,.1); background: transparent; color: rgba(255,255,255,.3); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .2s; }
+.settings-btn:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.05); color: rgba(255,255,255,.55); transform: none; }
+.settings-btn.active { background: rgba(255,255,255,.08); color: #fff; }
+.settings-btn svg { width: 16px; height: 16px; stroke-width: 1.5; }
 
 /* Settings page header */
-.settings-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-.back-btn { background: var(--accent-light); border: none; cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 7px 14px; border-radius: 8px; transition: all .2s; }
-.back-btn:hover { background: var(--accent); color: #fff; }
-.settings-title { font-size: 18px; font-weight: 700; color: var(--ink); }
+.settings-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.06); }
+.back-btn { background: transparent; border: none; cursor: pointer; color: rgba(255,255,255,.4); font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 0; border-radius: 0; transition: color .2s; }
+.back-btn:hover { background: transparent; color: #fff; }
+.settings-title { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: .5px; }
 
 /* Page transition */
 #page-main, #page-settings { animation: fadeIn .3s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Section hover */
-.section { transition: box-shadow .2s; }
-.section:hover { box-shadow: var(--shadow); }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--ink3); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink2); }
+
+@media (max-width: 700px) {
+  .header, .container { width: 100%; }
+  .mode-card { padding-left: 24px; padding-right: 24px; }
+  .row { flex-direction: column; }
+}
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>Shokz Type</h1>
-  <p class="subtitle">AI 语音输入助手</p>
+  <div class="brand">
+    <span class="brand-mark">SHOKZ TYPE</span>
+    <span class="brand-subtitle">AI 语音输入助手</span>
+  </div>
   <button class="settings-btn" onclick="showPage(state.page==='settings'?'main':'settings')" id="settings-btn" title="设置">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>
@@ -181,19 +212,32 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
 
   <!-- ===== 主页 ===== -->
   <div id="page-main">
+    <section class="hero" aria-label="Shokz Type">
+      <div class="hero-kicker">Voice Interface</div>
+      <h1>语音输入</h1>
+      <p>AI-Powered Voice Input</p>
+    </section>
+    <div class="mode-spacer" aria-hidden="true"></div>
     <div class="mode-grid" id="mode-grid"></div>
+    <div class="bottom-info">
+      <div class="info-left">
+        <span class="info-dot"></span>
+        <span id="engine-status">FunASR 本地引擎</span>
+      </div>
+      <div class="info-right" id="mic-status">Default Mic</div>
+    </div>
   </div>
 
   <!-- ===== 设置页 ===== -->
   <div id="page-settings" style="display:none">
     <div class="settings-header">
-      <button class="back-btn" onclick="showPage('main')">&#8592; 返回</button>
+      <button class="back-btn" onclick="showPage('main')" title="返回">&#8592;</button>
       <span class="settings-title">设置</span>
     </div>
 
     <!-- 1. 麦克风 -->
     <details class="section" open>
-      <summary><span>&#127908; 麦克风选择</span></summary>
+      <summary><span>&#127908; 麦克风</span></summary>
       <div class="section-body">
         <label>当前麦克风</label>
         <select id="mic-select"></select>
@@ -202,7 +246,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
 
     <!-- 2. ASR / LLM / Prompt -->
     <details class="section">
-      <summary><span>&#9881; ASR / LLM / Prompt</span></summary>
+      <summary><span>&#9881; ASR / LLM</span></summary>
       <div class="section-body">
         <label>ASR 后端</label>
         <div class="radio-group">
@@ -217,7 +261,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
           <input type="text" id="volc-model-id">
         </div>
 
-        <hr style="margin:16px 0;border:none;border-top:1px solid var(--bg)">
+        <hr style="margin:16px 0;border:none;border-top:1px solid var(--border)">
 
         <label>LLM API Base URL</label>
         <input type="text" id="llm-base-url" placeholder="https://api.openai.com">
@@ -246,7 +290,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
 
     <!-- 3. 声纹 -->
     <details class="section">
-      <summary><span>&#128100; 声纹设置</span></summary>
+      <summary><span>&#128100; 声纹</span></summary>
       <div class="section-body">
         <div class="toggle" style="margin-bottom:12px">
           <input type="checkbox" id="vp-toggle">
@@ -259,7 +303,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
 
     <!-- 4. 唤醒 -->
     <details class="section">
-      <summary><span>&#128276; 唤醒设置</span></summary>
+      <summary><span>&#128276; 唤醒</span></summary>
       <div class="section-body">
         <div class="radio-group">
           <label><input type="radio" name="wakeup-method" value="hotkey" checked> 热键唤醒</label>
@@ -305,7 +349,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
       <div class="progress-text" id="enroll-step-text">0/5</div>
     </div>
     <div class="enroll-sentence" id="enroll-sentence">准备开始...</div>
-    <div id="enroll-progress-bar" style="display:none;margin:12px 0;height:6px;background:var(--bg);border-radius:3px;overflow:hidden">
+    <div id="enroll-progress-bar" style="display:none;margin:12px 0;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden">
       <div id="enroll-progress-fill" style="height:100%;background:var(--accent);width:0%;border-radius:3px;transition:width linear"></div>
     </div>
     <div class="enroll-status" id="enroll-status"></div>
@@ -323,6 +367,7 @@ let state = {
   modes: [],
   currentMode: 'translate',
   settings: {},
+  devices: [],
   profiles: [],
   activeProfiles: [],
   sentences: [],
@@ -369,7 +414,7 @@ function renderModes() {
   document.getElementById('mode-grid').innerHTML = state.modes.map(m => `
     <div class="mode-card ${m.id === state.currentMode ? 'active' : ''}" onclick="setMode('${m.id}')">
       <div class="icon">${icons[m.id] || ''}</div>
-      <div class="name">${m.name}</div>
+      <div class="name">${m.id === 'transcribe' ? '转写' : m.name}</div>
       <div class="desc">${m.description}</div>
     </div>
   `).join('');
@@ -391,8 +436,10 @@ async function loadAllSettings() {
     api('/api/wakeup'),
   ]);
   state.settings = settings;
+  state.devices = devices.devices;
   populateSettings(settings);
   populateDevices(devices.devices);
+  updateBottomInfo(settings, devices.devices);
   populateVoiceprint(vp);
   populateWakeup(wakeup);
 }
@@ -429,6 +476,26 @@ function populateDevices(devices) {
   ).join('');
 }
 
+/**
+ * Updates the compact engine and microphone labels on the main page.
+ *
+ * Args:
+ *   settings: Current settings payload returned by the settings API.
+ *   devices: Available microphone devices returned by the devices API.
+ */
+function updateBottomInfo(settings = {}, devices = []) {
+  const engineEl = document.getElementById('engine-status');
+  const micEl = document.getElementById('mic-status');
+  if (!engineEl || !micEl) return;
+
+  const backend = settings.asr?.backend || 'funasr';
+  engineEl.textContent = backend === 'volcengine' ? '火山引擎云端' : 'FunASR 本地引擎';
+
+  const current = settings.audio?.device;
+  const selected = devices.find(d => d.id === current) || devices.find(d => d.is_default);
+  micEl.textContent = selected?.name || 'Default Mic';
+}
+
 document.getElementById('mic-select').addEventListener('change', async function() {
   const deviceId = this.value;
   const endpointId = this.options[this.selectedIndex].dataset.eid || '';
@@ -437,6 +504,7 @@ document.getElementById('mic-select').addEventListener('change', async function(
   await api('/api/settings', 'POST', {
     audio: { device: deviceId, preferred_device: endpointId },
   });
+  document.getElementById('mic-status').textContent = this.options[this.selectedIndex].textContent.replace(' (默认)', '');
   toast('麦克风已切换');
 });
 
@@ -495,7 +563,7 @@ function renderStartKeywords() {
     return;
   }
   el.innerHTML = state.startKeywords.map(kw => `
-    <li style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bg)">
+    <li style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
       <span style="font-size:14px">${kw}</span>
       <button class="btn btn-sm btn-danger" onclick="deleteStartKeyword('${kw}')">删除</button>
     </li>
@@ -578,6 +646,8 @@ async function saveSettings() {
     },
   };
   await api('/api/settings', 'POST', body);
+  state.settings = { ...state.settings, ...body };
+  updateBottomInfo(state.settings, state.devices);
   toast('配置已保存');
 }
 
@@ -817,14 +887,18 @@ function initDeviceSSE() {
       if (data.event === 'device_switched') {
         state.settings.audio = state.settings.audio || {};
         state.settings.audio.device = data.new_device.id;
+        state.devices = data.devices;
         populateDevices(data.devices);
+        updateBottomInfo(state.settings, data.devices);
         if (data.reason === 'preferred_reconnected') {
           toast('偏好麦克风已重新连接: ' + data.new_device.name);
         } else {
           toast('麦克风已断开，已自动切换到: ' + data.new_device.name);
         }
       } else if (data.event === 'devices_changed') {
+        state.devices = data.devices;
         populateDevices(data.devices);
+        updateBottomInfo(state.settings, data.devices);
         toast('麦克风设备列表已更新');
       }
     } catch {}

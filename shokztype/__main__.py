@@ -1,14 +1,33 @@
 """Shokz Type Web service entry point.
 
-Usage: python -m shokztype [--port 8000]
+Usage:
+    python -m shokztype                # 桌面窗口模式（默认）
+    python -m shokztype --no-window    # 仅启动 HTTP 服务，不弹窗口
+    python -m shokztype --port 9000    # 自定义端口
 """
 
 import argparse
 import logging
+import threading
+import time
+from urllib.request import urlopen
+from urllib.error import URLError
+
+
+def _wait_for_server(host: str, port: int, timeout: float = 30):
+    """轮询 /api/health 直到服务就绪。"""
+    url = f"http://{host}:{port}/api/health"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            urlopen(url, timeout=2)
+            return
+        except (URLError, OSError):
+            time.sleep(0.2)
+    raise TimeoutError(f"服务未在 {timeout}s 内就绪: {url}")
 
 
 def main():
-    # 快速检查：如果是 --overlay 模式，直接启动浮窗，不走主流程
     import sys
     if "--overlay" in sys.argv:
         port = 9123
@@ -16,8 +35,7 @@ def main():
             idx = sys.argv.index("--port")
             port = int(sys.argv[idx + 1])
         from shokztype.web.services.overlay_process import OverlayWindow
-        overlay = OverlayWindow(port=port)
-        overlay.run()
+        OverlayWindow(port=port).run()
         return
 
     logging.basicConfig(
@@ -34,12 +52,34 @@ def main():
 
     app = create_app()
 
-    parser = argparse.ArgumentParser(description="Shokz Type Web Server")
+    parser = argparse.ArgumentParser(description="Shokz Type")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--overlay", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-window", action="store_true",
+                        help="仅启动 HTTP 服务，不弹桌面窗口")
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+
+    if args.no_window:
+        uvicorn.run(app, host=args.host, port=args.port)
+        return
+
+    # 后台线程跑 uvicorn
+    server_thread = threading.Thread(
+        target=uvicorn.run,
+        args=(app,),
+        kwargs={"host": args.host, "port": args.port, "log_level": "warning"},
+        daemon=True,
+    )
+    server_thread.start()
+
+    _wait_for_server(args.host, args.port)
+
+    # 主线程跑 pywebview 窗口（Windows 上使用 EdgeChromium）
+    import webview
+    url = f"http://{args.host}:{args.port}"
+    webview.create_window("Shokz Type", url, width=460, height=720, resizable=True)
+    webview.start()
 
 
 if __name__ == "__main__":

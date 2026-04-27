@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Shokz Type** is a Chinese voice-to-text application for Windows. It captures audio, runs speech recognition, and types the result into the active window. The app runs as a FastAPI web server with a browser-based UI.
-
-Single entry point: `python -m shokztype` starts the FastAPI server and serves `static/index.html`.
+**Shokz Type** (package name `shokztype`) is a Chinese voice-to-text application. It captures audio, runs speech recognition (local FunASR or cloud DashScope/VolcEngine), and types the result into the active window. The primary interface is a FastAPI web server with a browser-based SPA.
 
 ## Running
 
 ```bash
 pip install -r requirements.txt
-cp config.json.example config.json   # set cloud_asr.api_key if using DashScope
+cp config.json.example config.json   # set cloud_asr.api_key if using cloud ASR
 
-python -m shokztype                  # start web server (default port 8000)
+python -m shokztype                  # web server (default localhost:8000)
 python -m shokztype --port 9000      # custom port
+shokztype-cli                        # interactive CLI mode (menu-driven)
+shokztype-cli --web                  # NiceGUI desktop UI on port 8080
 ```
 
 ## Tests
@@ -28,63 +28,84 @@ python -m pytest tests/test_speaker_db.py::test_name -v  # single test
 
 `tests/conftest.py` mocks `torch`, `torchaudio`, and `fireredvad` so tests run without GPU/model dependencies.
 
-## Package Structure
+## Architecture
+
+### Three interfaces, one core
 
 ```
-shokztype/                  # Top-level Python package
-├── __init__.py             # __version__, PROJECT_ROOT constant
-├── __main__.py             # Entry point: init_worker() + uvicorn
-├── core/                   # Audio pipeline (was: app/)
-│   └── ...                 # 18 modules (see below)
-└── web/                    # FastAPI web service (was: web/)
-    ├── server.py           # App factory, lifespan, static file serving
-    ├── web_config.py       # Extends core config with LLM/prompt/wakeup fields
-    ├── models.py           # Pydantic request/response models
-    ├── static/index.html   # Browser UI (vanilla JS SPA)
-    ├── routers/            # 8 API routers
-    └── services/           # 6 service modules
+shokztype/
+├── core/          # Audio pipeline: capture, VAD, ASR, speaker, KWS, output
+├── web/           # FastAPI web service (primary interface)
+│   ├── server.py          # App factory + lifespan
+│   ├── static/index.html  # Vanilla JS SPA
+│   ├── routers/           # 8 REST/SSE routers
+│   └── services/          # Pipeline orchestration, transcribers, wakeup modules
+├── desktop/       # NiceGUI desktop UI (alternative, via `shokztype-cli --web`)
+├── __main__.py    # Entry point for `python -m shokztype` (web mode)
+└── cli.py         # Entry point for `shokztype-cli` (interactive CLI)
 ```
 
-### `shokztype/core/` — Audio pipeline
+All three interfaces share `core/` but wire it differently:
+- **Web** (`__main__.py`): Uses EventBus-driven pipeline in `web/services/recording_pipeline.py`
+- **CLI** (`cli.py`): Wires core components directly with callbacks
+- **Desktop** (`desktop/`): NiceGUI pages with shared `AppState` singleton
 
-Public API exported via `core/__init__.py`: `load_config`, `AudioCapture`, `TranscriptionWorker`, `type_text`.
+### EventBus architecture (web mode)
 
-Key modules:
-- **config.py** — `DEFAULT_CONFIG` dict with all settings; `load_config()` deep-merges `config.json` on top
-- **audio_source.py** — Abstract `AudioSource` base class
-- **audio_capture.py** — `AudioCapture` — sounddevice microphone (16kHz 16-bit PCM)
-- **funasr_server.py** — Local ASR via FunASR ONNX (Paraformer, ~500MB auto-download from ModelScope)
-- **cloud_asr.py** — Cloud ASR via DashScope streaming API (needs `DASHSCOPE_API_KEY` or config)
-- **vad.py** — FireRedVAD wrapper for speech/silence classification
-- **vad_worker.py** — `VadTranscriptionWorker` — continuous VAD-triggered recording + ASR
-- **kws.py** — Sherpa-ONNX keyword spotter for wake-word activation
-- **speaker.py** — CAM++ speaker embeddings (~27MB auto-download)
-- **speaker_db.py** — JSON-based speaker database
-- **speaker_cluster.py** — Hierarchical clustering for diarization
-- **transcribe.py** — `TranscriptionWorker` — hotkey toggle record/transcribe
-- **output.py** — `type_text()` — types text into active window (Windows keyboard + clipboard fallback)
-- **command_dispatcher.py** — Voice command registration and matching framework
+The web service uses a publish-subscribe `EventBus` (`web/services/event_bus.py`) to decouple components. The pipeline in `recording_pipeline.py` assembles modules and connects them via bus events:
 
-### `shokztype/web/` — FastAPI service
+```
+Wakeup Module ──emit("start"/"stop")──► Transcriber Module
+     │                                       │
+     │                                  emit("partial"/"result"/"done")
+     │                                       │
+     └──── EventBus ◄────────────────────────┘
+                │
+          _on_bus_result() → text_pipeline (LLM) → type_text()
+          _on_bus_state()  → overlay UDP + SSE to browser
+```
 
-- **server.py** — App factory with lifespan. Serves `static/index.html` at `/`.
-- **web_config.py** — Extends `core.config.DEFAULT_CONFIG` with LLM/prompt/wakeup/voiceprint fields. Has its own `load_config()`/`get_config()`/`update_config()` that persist to `config.json`.
-- **routers/** — `health`, `modes`, `settings`, `devices`, `process`, `voiceprint`, `wakeup`, `recording`
-- **services/recording_pipeline.py** — Main orchestration. **`init_worker()` must be called in the main thread** (Python signal module constraint); `__main__.py` calls it at module level before `uvicorn.run()`.
-- **services/text_pipeline.py** — Routes text through LLM for translate/polish modes
-- **services/llm_client.py** — Generic OpenAI-compatible LLM client
+**Wakeup modules** (mutually exclusive):
+- `HotkeyWakeup` — keyboard shortcut toggles recording
+- `VadKwsWakeup` — VAD + keyword spotter, state machine: IDLE → ACTIVE → LOCKED → IDLE
 
-## Configuration
+**Transcriber modules** (mutually exclusive):
+- `BatchTranscriber` — records audio, sends to FunASR after stop
+- `StreamTranscriber` — WebSocket streaming to cloud ASR (DashScope/VolcEngine)
 
-`config.json` extends `config.json.example`. Sections: `hotkeys`, `audio`, `vad`, `asr`, `cloud_asr`, `output`, `speaker`, `kws`, `logging`, plus web-specific: `llm`, `prompts`, `voiceprint`, `wakeup`.
+**Optional frame filter**: `SpeakerGate` inserts between wakeup and transcriber to filter by voiceprint.
 
-## Key Design Notes
+### Pipeline lifecycle
 
-- **Project root**: `shokztype.PROJECT_ROOT` — canonical constant used by all path resolution instead of fragile `dirname(__file__)` chains.
-- **ASR return format**: Both `funasr_server.py` and `cloud_asr.py` return `{success, text, raw_text, confidence, duration}` — interchangeable.
-- **Config merging**: `_merge_dict()` does recursive dict merge. User `config.json` overrides only the keys it sets.
-- **Two config layers**: `core/config.py` has base defaults; `web/web_config.py` extends with web-specific fields. Both read from `config.json`.
+`init_worker()` in `recording_pipeline.py` **must be called in the main thread** (Python `signal` module constraint). `__main__.py` calls it before `uvicorn.run()`. The `_assemble()` function wires modules based on config; `restart_pipeline()` tears down and reassembles on config changes.
+
+### Config system
+
+Two layers, both reading from `config.json`:
+- `core/config.py` — `DEFAULT_CONFIG` with audio/VAD/ASR/speaker/KWS defaults
+- `web/web_config.py` — extends with LLM/prompt/wakeup/voiceprint fields
+
+`_merge_dict()` does recursive deep merge; user config overrides only keys it sets. `update_config()` persists changes back to `config.json` and emits `config_changed` on the bus.
+
+### ASR backends
+
+Three providers, unified return format `{success, text, raw_text, confidence, duration}`:
+- **Local FunASR** (`funasr_server.py`) — ONNX Paraformer, auto-downloads ~500MB from ModelScope
+- **DashScope** (`cloud_asr.py`) — Alibaba streaming API
+- **VolcEngine** (`volcengine_asr.py`) — ByteDance Seed ASR, binary WebSocket protocol
+
+`cloud_asr_factory.py` selects the implementation based on `asr.backend` and `cloud_asr.provider` config fields.
+
+FunASR is loaded once and reused via monkey-patching (`_install_funasr_reuse_patch` replaces `FunASRServer` class with a wrapper that returns the cached instance).
+
+### Path resolution
+
+`shokztype.PROJECT_ROOT` = repo root (dirname of package). `shokztype.APP_DIR` = same in dev, but `dirname(sys.executable)` when frozen with PyInstaller. All config/log/model paths resolve relative to `APP_DIR`.
+
+## Key Conventions
+
+- **Windows-specific code**: `keyboard` lib, `winsound.Beep`, ctypes `SendInput` in `output.py` — all Windows-dependent. The `keyboard` library requires root/admin on non-Windows.
 - **Model auto-download**: First run downloads FunASR (~500MB), CAM++ (~27MB), FireRedVAD (~10MB) from ModelScope. Set `MODELSCOPE_CACHE` to control cache location.
-- **Windows-specific**: `keyboard` lib, `winsound.Beep`, ctypes `SendInput` — all Windows-dependent.
-- **KWS tokens**: `keywords.txt` is token-indexed. Use the web UI "add keyword" API to convert text to tokens.
-- **GPU**: Default CPU. For CUDA: `pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121` and set `FUNASR_DEVICE=cuda:0`.
+- **KWS tokens**: `keywords.txt` is token-indexed (not plain text). Use the web UI "add keyword" API or `shokztype-kws` CLI to convert text to tokens.
+- **Audio format**: 16kHz 16-bit mono PCM throughout the pipeline.
+- **Chinese UI/logs**: User-facing strings and log messages are in Chinese.

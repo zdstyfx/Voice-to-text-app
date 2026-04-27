@@ -15,15 +15,15 @@ import tkinter.font as tkfont
 UDP_PORT = 9123
 
 STYLES = {
-    "loading":   {"bg": "#555555", "fg": "#ffffff", "text": "加载中..."},
-    "ready":     {"bg": "#166534", "fg": "#ffffff", "text": "就绪"},
-    "recording": {"bg": "#dc2626", "fg": "#ffffff", "text": "● 录音中"},
-    "processing":{"bg": "#b45309", "fg": "#ffffff", "text": "处理中..."},
-    "idle":      {"bg": "#1e40af", "fg": "#ffffff", "text": "等待唤醒词"},
-    "active":    {"bg": "#dc2626", "fg": "#ffffff", "text": "正在听..."},
-    "error":     {"bg": "#dc2626", "fg": "#ffffff", "text": "错误"},
-    "switching": {"bg": "#b45309", "fg": "#ffffff", "text": "切换中..."},
-    "saving":    {"bg": "#b45309", "fg": "#ffffff", "text": "保存中..."},
+    "loading":    {"bg": "#27272a", "fg": "#71717a", "text": "● 加载中..."},
+    "ready":      {"bg": "#0c4a6e", "fg": "#7dd3fc", "text": "● 就绪"},
+    "idle":       {"bg": "#1e293b", "fg": "#64748b", "text": "● 等待唤醒词"},
+    "recording":  {"bg": "#064e3b", "fg": "#6ee7b7", "text": "● 录音中"},
+    "active":     {"bg": "#064e3b", "fg": "#6ee7b7", "text": "● 录音中"},
+    "processing": {"bg": "#312e81", "fg": "#a5b4fc", "text": "● 处理中..."},
+    "saving":     {"bg": "#27272a", "fg": "#a1a1aa", "text": "● 保存中..."},
+    "switching":  {"bg": "#27272a", "fg": "#a1a1aa", "text": "● 切换中..."},
+    "error":      {"bg": "#78350f", "fg": "#fcd34d", "text": "● 错误"},
 }
 
 MAX_WIDTH_RATIO = 0.5
