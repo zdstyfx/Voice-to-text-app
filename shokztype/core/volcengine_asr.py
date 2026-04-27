@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # 协议常量
 # ---------------------------------------------------------------------------
 
-_DEFAULT_WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+_DEFAULT_WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
 
 # Header byte 0: version(4bit) | header_size(4bit)
 _PROTOCOL_VERSION = 0x1
@@ -173,6 +173,15 @@ class VolcEngineASR:
         self._sample_rate = cloud_cfg.get("sample_rate", 16000)
         self._format = cloud_cfg.get("format", "pcm")
 
+        # 合并两层 volcengine 配置，优先 asr.volcengine
+        merged_volc = {**cloud_volc_cfg, **volc_cfg}
+        self._enable_ddc = bool(merged_volc.get("enable_ddc", True))
+        self._enable_nonstream = bool(merged_volc.get("enable_nonstream", False))
+        self._end_window_size = int(merged_volc.get("end_window_size", 800))
+        self._force_to_speech_time = int(merged_volc.get("force_to_speech_time", 0))
+        self._hotwords: list[str] = list(merged_volc.get("hotwords", []))
+        self._result_type = str(merged_volc.get("result_type", "full"))
+
         # 流式状态
         self._audio_queue: Optional[Queue] = None
         self._stream_thread: Optional[threading.Thread] = None
@@ -184,6 +193,25 @@ class VolcEngineASR:
 
     def _make_request_payload(self) -> dict:
         """构建 full client request 的 JSON payload。"""
+        req: dict[str, Any] = {
+            "model_name": "bigmodel",
+            "enable_itn": True,
+            "enable_punc": True,
+            "show_utterances": True,
+            "result_type": self._result_type,
+            "enable_ddc": self._enable_ddc,
+            "enable_nonstream": self._enable_nonstream,
+            "end_window_size": self._end_window_size,
+        }
+        if self._force_to_speech_time > 0:
+            req["force_to_speech_time"] = self._force_to_speech_time
+        if self._hotwords:
+            req["corpus"] = {
+                "context": json.dumps(
+                    {"hotwords": [{"word": w} for w in self._hotwords]},
+                    ensure_ascii=False,
+                )
+            }
         return {
             "user": {
                 "uid": str(uuid.uuid4()),
@@ -194,13 +222,7 @@ class VolcEngineASR:
                 "bits": 16,
                 "channel": 1,
             },
-            "request": {
-                "model_name": "bigmodel",
-                "enable_itn": True,
-                "enable_punc": True,
-                "show_utterances": True,
-                "result_type": "full",
-            },
+            "request": req,
         }
 
     # ------------------------------------------------------------------
@@ -464,7 +486,7 @@ class VolcEngineASR:
         try:
             async for message in ws:
                 if isinstance(message, str):
-                    continue  # 忽略文本消息
+                    continue
 
                 resp = _parse_response(message)
                 if resp.get("error"):
@@ -479,9 +501,10 @@ class VolcEngineASR:
                 if isinstance(res, list) and res:
                     res = res[0]
                 if not isinstance(res, dict):
+                    if resp.get("is_last"):
+                        break
                     continue
 
-                # 全局文本作为 partial
                 full_text = res.get("text", "")
 
                 utterances = res.get("utterances", [])
@@ -506,6 +529,16 @@ class VolcEngineASR:
                     last_partial_text = full_text
                     on_partial(full_text)
 
+                # 服务端标记最后一帧 → 将当前文本作为最终结果
+                if resp.get("is_last"):
+                    if full_text and full_text != last_partial_text:
+                        on_sentence(full_text)
+                    elif full_text:
+                        on_sentence(full_text)
+                    break
+
         except Exception as e:
-            # websockets.ConnectionClosed 等
             logger.debug("流式接收循环结束: %s", e)
+            # 连接断开时，将最后已知文本作为最终结果
+            if last_partial_text:
+                on_sentence(last_partial_text)

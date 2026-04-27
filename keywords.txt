@@ -1,2 +1,7 @@
 n ǐ h ǎo x iǎo zh ù sh ǒu @你好小助手
 n ǐ h ǎo x iǎo sh áo @你好小韶
+t uì ch ū @退出
+q ǔ x iāo @取消
+z ài j iàn @再见
+j ié sh ù @结束
+w ǒ sh uō w án l e @我说完了

@@ -54,10 +54,15 @@ _overlay_sock: socket.socket | None = None
 def _start_overlay():
     global _overlay_proc, _overlay_sock
     try:
-        script = os.path.join(os.path.dirname(__file__), "overlay_process.py")
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 打包模式：用 exe 自身的 --overlay 入口
+            cmd = [sys.executable, "--overlay", "--port", str(_OVERLAY_PORT)]
+        else:
+            # 开发模式：直接跑 overlay_process.py
+            script = os.path.join(os.path.dirname(__file__), "overlay_process.py")
+            cmd = [sys.executable, script, "--port", str(_OVERLAY_PORT)]
         _overlay_proc = subprocess.Popen(
-            [sys.executable, script, "--port", str(_OVERLAY_PORT)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         _overlay_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         logger.info("浮窗进程已启动 (PID=%d)", _overlay_proc.pid)
@@ -142,11 +147,33 @@ def _on_bus_partial(text):
         _set_state("recording", text)
 
 
+def _strip_end_keywords(text: str) -> str:
+    """去除结尾的结束关键词（KWS 结束词会被 ASR 一起转录）。"""
+    config = get_config()
+    end_kws = config.get("wakeup", {}).get("end_keywords", [])
+    if not end_kws:
+        return text
+    changed = True
+    while changed:
+        changed = False
+        for kw in end_kws:
+            for suffix in (kw, kw + "。", kw + "，", kw + " "):
+                if text.endswith(suffix):
+                    text = text[:-len(suffix)].rstrip("，。、 ")
+                    changed = True
+                    break
+    return text
+
+
 def _on_bus_result(text):
     """bus.emit('result', text) → LLM 处理 → 输出。"""
     if not text or not text.strip():
         return
     text = text.strip()
+    if _wakeup_method == "vad":
+        text = _strip_end_keywords(text)
+        if not text:
+            return
     logger.info("转录结果: %s", text[:80])
 
     config = get_config()
@@ -174,10 +201,15 @@ def _on_bus_done(_):
     """bus.emit('done') → 恢复到当前模式的默认状态。"""
     global _recording
     _recording = False
-    if _wakeup_method == "vad":
-        _set_state("idle")
+    if _ui_state.get("status") == "error":
+        def _delayed_restore():
+            import time
+            time.sleep(3)
+            if _ui_state.get("status") == "error":
+                _set_state("idle" if _wakeup_method == "vad" else "ready")
+        threading.Thread(target=_delayed_restore, daemon=True).start()
     else:
-        _set_state("ready")
+        _set_state("idle" if _wakeup_method == "vad" else "ready")
 
 
 def _on_bus_start(_):
@@ -450,6 +482,7 @@ def init_worker() -> None:
     import time
     time.sleep(0.3)
     _set_state("loading")
+    print("[init] overlay 已启动")
 
     config = get_config()
     asr_backend = config.get("asr", {}).get("backend", "local")
@@ -458,7 +491,9 @@ def init_worker() -> None:
     # 本地 ASR：立即加载模型；云端 ASR：跳过（后续切换时懒加载）
     if not use_cloud:
         try:
+            print("[init] 正在加载本地 ASR 模型...")
             ensure_funasr_loaded()
+            print("[init] 本地 ASR 模型加载完成")
         except Exception as e:
             _init_error = str(e)
             print(f"[init] {_init_error}")
@@ -467,9 +502,11 @@ def init_worker() -> None:
         print(f"[init] 云端 ASR 模式 (backend={asr_backend})，本地模型按需加载")
 
     # 初始化声纹模块
+    print("[init] 正在初始化声纹模块...")
     from shokztype.web.services.voiceprint_manager import init_speaker
     init_speaker(config)
     print("[init] 声纹模块已初始化")
+    print("[init] 正在组装管线...")
 
     # 组装管线
     try:
@@ -533,7 +570,7 @@ def _on_config_changed(changes: dict) -> None:
     # 判断哪些模块需要重组
     device_changed = "device" in audio_changes and str(audio_changes["device"]) != str(_active_device_id)
     asr_changed = "backend" in asr_changes
-    wakeup_changed = "method" in wakeup_changes
+    wakeup_changed = "method" in wakeup_changes or "hotkey" in wakeup_changes or "end_keywords" in wakeup_changes or "keywords_file" in wakeup_changes
     voiceprint_changed = "voiceprint" in changes
 
     _set_state("saving")
@@ -556,10 +593,10 @@ def _on_config_changed(changes: dict) -> None:
         threading.Thread(target=restart_pipeline, daemon=True, name="ConfigRestart").start()
     elif asr_changed and not wakeup_changed:
         logger.info("ASR 后端变更 → 换转录模块")
-        _swap_transcriber(config)
+        threading.Thread(target=_swap_transcriber, args=(config,), daemon=True, name="SwapASR").start()
     elif wakeup_changed and not asr_changed:
         logger.info("唤醒方式变更 → 换唤醒模块")
-        _swap_wakeup(config)
+        threading.Thread(target=_swap_wakeup, args=(config,), daemon=True, name="SwapWakeup").start()
     else:
         logger.info("多项配置变更 → 重组管线")
         threading.Thread(target=restart_pipeline, daemon=True, name="ConfigRestart").start()
@@ -595,37 +632,10 @@ def _swap_transcriber(config: dict) -> None:
 
 
 def _swap_wakeup(config: dict) -> None:
-    """只替换唤醒模块，bus / audio / transcriber 不动。"""
-    global _wakeup, _wakeup_method
-
-    # 如果正在录音，先停掉
+    """替换唤醒模块。模式切换涉及帧链路变更，必须全量重组。"""
     if _recording and bus:
         bus.emit("stop")
-
-    # 拆旧
-    if _wakeup is not None:
-        try:
-            _wakeup.stop()
-        except Exception:
-            pass
-
-    # 装新
-    wakeup_method = config.get("wakeup", {}).get("method", "hotkey")
-    _wakeup_method = wakeup_method
-
-    if wakeup_method == "vad":
-        # VAD 模式需要转发队列，转录模块也要换 → 全部重组
-        logger.info("切换到 VAD 模式需要重组转录模块，执行全量重组")
-        threading.Thread(target=restart_pipeline, daemon=True, name="WakeupRestart").start()
-        return
-    else:
-        from shokztype.web.services.wakeup_hotkey import HotkeyWakeup
-        combo = config.get("wakeup", {}).get("hotkey", {}).get("combo", "f2")
-        _wakeup = HotkeyWakeup(bus, combo)
-        _wakeup.start()
-        logger.info("唤醒模块已切换: 热键 (%s)", combo)
-
-    _set_state("idle" if _wakeup_method == "vad" else "ready")
+    restart_pipeline()
 
 
 def restart_pipeline() -> dict:

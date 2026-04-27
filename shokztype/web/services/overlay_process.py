@@ -14,23 +14,23 @@ import tkinter.font as tkfont
 
 UDP_PORT = 9123
 
-# 状态颜色映射
 STYLES = {
     "loading":   {"bg": "#555555", "fg": "#ffffff", "text": "加载中..."},
-    "ready":     {"bg": "#166534", "fg": "#ffffff", "text": "就绪 -- 按 F2 录音"},
-    "recording": {"bg": "#166534", "fg": "#ffffff", "text": "  ● 录音中...  "},
+    "ready":     {"bg": "#166534", "fg": "#ffffff", "text": "就绪"},
+    "recording": {"bg": "#dc2626", "fg": "#ffffff", "text": "● 录音中"},
     "processing":{"bg": "#b45309", "fg": "#ffffff", "text": "处理中..."},
-    "idle":      {"bg": "#1e40af", "fg": "#ffffff", "text": "IDLE -- 等待唤醒词"},
-    "active":    {"bg": "#166534", "fg": "#ffffff", "text": "ACTIVE -- 正在听"},
+    "idle":      {"bg": "#1e40af", "fg": "#ffffff", "text": "等待唤醒词"},
+    "active":    {"bg": "#dc2626", "fg": "#ffffff", "text": "正在听..."},
     "error":     {"bg": "#dc2626", "fg": "#ffffff", "text": "错误"},
     "switching": {"bg": "#b45309", "fg": "#ffffff", "text": "切换中..."},
     "saving":    {"bg": "#b45309", "fg": "#ffffff", "text": "保存中..."},
 }
 
-MAX_WIDTH_RATIO = 0.5  # 最大占屏幕宽度的一半
-TASKBAR_MARGIN = 56    # 距离屏幕底部的像素（任务栏高度 + 间距）
-PAD_X = 18
-PAD_Y = 8
+MAX_WIDTH_RATIO = 0.5
+TASKBAR_MARGIN = 56
+PAD_X = 24
+PAD_Y = 10
+CORNER_RADIUS = 16
 
 
 class OverlayWindow:
@@ -39,8 +39,11 @@ class OverlayWindow:
         self._root = tk.Tk()
         self._root.overrideredirect(True)
         self._root.attributes("-topmost", True)
-        self._root.attributes("-alpha", 0.92)
-        self._root.configure(bg="#555")
+        self._root.attributes("-alpha", 0.88)
+        # 透明色作为窗口背景，用于圆角效果
+        self._transparent = "#010101"
+        self._root.configure(bg=self._transparent)
+        self._root.attributes("-transparentcolor", self._transparent)
 
         self._font = tkfont.Font(family="Microsoft YaHei UI", size=11, weight="bold")
         self._line_h = self._font.metrics("linespace")
@@ -49,26 +52,29 @@ class OverlayWindow:
         self._screen_h = self._root.winfo_screenheight()
         self._max_w = int(self._screen_w * MAX_WIDTH_RATIO)
 
-        # 使用 Canvas 实现文本裁剪 + 右对齐滚动效果
-        self._canvas_h = self._line_h + PAD_Y * 2
+        self._canvas_h = self._line_h + PAD_Y * 2 + 4
         self._canvas = tk.Canvas(
             self._root,
             height=self._canvas_h,
-            bg="#555",
+            bg=self._transparent,
             highlightthickness=0,
             bd=0,
         )
         self._canvas.pack(fill=tk.X)
+
+        # 圆角矩形背景
+        self._bg_id = None
+        # 居中文本
         self._text_id = self._canvas.create_text(
-            PAD_X, self._canvas_h // 2,
+            0, self._canvas_h // 2,
             text="  Shokz Type  ",
             font=self._font,
             fill="white",
-            anchor="w",
+            anchor="center",
         )
 
         self._root.update_idletasks()
-        self._reposition()
+        self._apply({"status": "loading"})
 
         # UDP 接收线程
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -104,13 +110,27 @@ class OverlayWindow:
             self._root.after(100, self._check_updates)
 
     def _reposition(self):
-        """将窗口放置在屏幕底部居中，紧贴任务栏上方。"""
         self._root.update_idletasks()
         w = self._root.winfo_width()
         h = self._root.winfo_height()
         x = (self._screen_w - w) // 2
         y = self._screen_h - h - TASKBAR_MARGIN
         self._root.geometry(f"+{x}+{y}")
+
+    def _draw_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        """在 Canvas 上画圆角矩形。"""
+        points = [
+            x1 + r, y1,
+            x2 - r, y1,
+            x2, y1, x2, y1 + r,
+            x2, y2 - r,
+            x2, y2, x2 - r, y2,
+            x1 + r, y2,
+            x1, y2, x1, y2 - r,
+            x1, y1 + r,
+            x1, y1, x1 + r, y1,
+        ]
+        return self._canvas.create_polygon(points, smooth=True, **kwargs)
 
     def _apply(self, msg: dict):
         status = msg.get("status", "loading")
@@ -121,31 +141,37 @@ class OverlayWindow:
         bg = style["bg"]
         fg = style["fg"]
 
-        # 计算文本自然宽度
+        # 计算文本宽度
         text_w = self._font.measure(display) + PAD_X * 2
-        # 窗口宽度：自然宽度或最大宽度，取较小值
         win_w = min(text_w, self._max_w)
-        # 至少有个最小宽度
-        win_w = max(win_w, 120)
+        win_w = max(win_w, 140)
 
-        # 更新画布和文本
-        self._canvas.config(width=win_w, bg=bg)
-        self._root.configure(bg=bg)
+        self._canvas.config(width=win_w, bg=self._transparent)
+        self._root.configure(bg=self._transparent)
 
+        # 重绘圆角背景
+        if self._bg_id:
+            self._canvas.delete(self._bg_id)
+        self._bg_id = self._draw_rounded_rect(
+            0, 0, win_w, self._canvas_h, CORNER_RADIUS,
+            fill=bg, outline=bg,
+        )
+        self._canvas.tag_lower(self._bg_id)
+
+        # 文本居中
         if text_w > self._max_w:
-            # 文本超宽：右对齐，显示最新内容（文本锚点在右侧）
+            # 超长文本：右对齐显示最新内容
             self._canvas.coords(self._text_id, win_w - PAD_X, self._canvas_h // 2)
             self._canvas.itemconfig(self._text_id, text=display, fill=fg, anchor="e")
         else:
-            # 正常：左对齐
-            self._canvas.coords(self._text_id, PAD_X, self._canvas_h // 2)
-            self._canvas.itemconfig(self._text_id, text=display, fill=fg, anchor="w")
+            # 正常：居中
+            self._canvas.coords(self._text_id, win_w // 2, self._canvas_h // 2)
+            self._canvas.itemconfig(self._text_id, text=display, fill=fg, anchor="center")
 
         self._root.geometry(f"{win_w}x{self._canvas_h}")
         self._reposition()
 
     def _ensure_topmost(self):
-        """通过 Windows API 周期性地重新置顶窗口。"""
         if not self._running:
             return
         try:

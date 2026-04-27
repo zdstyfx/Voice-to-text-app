@@ -783,9 +783,6 @@ async function saveWakeup() {
     hotkey_combo: document.getElementById('hotkey-display').textContent,
     end_keywords: state.endKeywords,
   });
-  // 后台重启，不阻塞
-  api('/api/recording/restart', 'POST');
-  toast('正在切换，请稍候...');
 }
 
 // --- 热键录制（后端系统级监听） ---
@@ -802,7 +799,9 @@ async function startRecordHotkey() {
 
   if (resp.success) {
     el.textContent = resp.combo;
-    toast('热键已录制: ' + resp.combo);
+    // 录制成功后自动保存
+    await saveWakeup();
+    toast('热键已切换: ' + resp.combo);
   } else {
     el.textContent = document.getElementById('hotkey-display').dataset.prev || 'F2';
     toast(resp.error || '录制失败');

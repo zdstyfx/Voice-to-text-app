@@ -54,8 +54,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "volcengine": {
             "api_key": "",
             "model_id": "",
-            "ws_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+            "ws_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
             "resource_id": "volc.bigasr.sauc.duration",
+            "enable_ddc": True,
+            "enable_nonstream": False,
+            "end_window_size": 800,
+            "force_to_speech_time": 0,
+            "hotwords": [],
+            "result_type": "full",
         },
     },
     "output": {
@@ -107,9 +113,8 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     config = dict(DEFAULT_CONFIG)
     if not path:
         # 自动检测项目根目录的 config.json
-        from shokztype import PROJECT_ROOT
-        project_root = PROJECT_ROOT
-        auto_path = os.path.join(project_root, "config.json")
+        from shokztype import APP_DIR
+        auto_path = os.path.join(APP_DIR, "config.json")
         if os.path.exists(auto_path):
             path = auto_path
         else:
@@ -138,9 +143,8 @@ def ensure_logging_dir(config: Dict[str, Any]) -> str:
         pass
     else:
         # 相对路径：基于项目根目录
-        from shokztype import PROJECT_ROOT
-        project_root = PROJECT_ROOT
-        log_dir = os.path.join(project_root, log_dir)
+        from shokztype import APP_DIR
+        log_dir = os.path.join(APP_DIR, log_dir)
     
     os.makedirs(log_dir, exist_ok=True)
     return log_dir

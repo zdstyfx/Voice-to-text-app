@@ -40,15 +40,23 @@ class SpeakerProcessor:
         # Load speaker database
         self._db = SpeakerDB(db_path)
 
-        # Load CAM++ model directly (bypass modelscope.pipelines)
+        # Load CAM++ model: 优先从 models/ 目录加载，再走 modelscope 缓存
         logger.info("Loading CAM++ speaker model: %s", model_id)
-        from modelscope.hub.snapshot_download import snapshot_download
 
-        try:
-            model_dir = snapshot_download(model_id, local_files_only=True)
-        except Exception:
-            logger.info("Model not cached, downloading...")
-            model_dir = snapshot_download(model_id)
+        model_dir = None
+        short_name = model_id.split('/')[-1] if '/' in model_id else model_id
+
+        # 1. 检查程序目录下的 models/
+        from shokztype import APP_DIR
+        bundled = os.path.join(APP_DIR, "models", short_name)
+        if os.path.isdir(bundled):
+            model_dir = bundled
+            logger.info("Using bundled speaker model: %s", bundled)
+
+        # 2. 走 modelscope 缓存
+        if model_dir is None:
+            from shokztype.core.download_models import get_model_cache_path
+            model_dir = get_model_cache_path(model_id, None)
 
         config_path = os.path.join(model_dir, "configuration.json")
         with open(config_path, "r", encoding="utf-8") as f:
@@ -56,7 +64,8 @@ class SpeakerProcessor:
         model_config = cfg["model"]["model_config"]
         pretrained_model = cfg["model"]["pretrained_model"]
 
-        from modelscope.models.audio.sv.DTDNN import SpeakerVerificationCAMPPlus
+        # 使用自己的 CAM++ 实现（纯 PyTorch，不依赖 modelscope）
+        from shokztype.core.campplus import SpeakerVerificationCAMPPlus
 
         self._model = SpeakerVerificationCAMPPlus(
             model_dir=model_dir,

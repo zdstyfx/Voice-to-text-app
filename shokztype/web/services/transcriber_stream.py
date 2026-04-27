@@ -1,5 +1,6 @@
 """流式 ASR 转录模块：建立 WebSocket 连接，实时送帧，实时出结果。"""
 
+import itertools
 import logging
 import threading
 from typing import Any
@@ -13,6 +14,7 @@ from shokztype.web.services.event_bus import EventBus
 logger = logging.getLogger(__name__)
 
 _CHUNK_FRAMES = 10  # 10 × 20ms = 200ms per chunk
+_FINAL_WAIT = 1.5  # stop 后等 sentence 回调的时间（秒），超时则用 partial
 
 
 class StreamTranscriber:
@@ -22,12 +24,14 @@ class StreamTranscriber:
                  input_queue=None) -> None:
         self._bus = bus
         self._audio = audio
-        self._input_queue = input_queue  # VAD 模式：从转发队列读；热键模式：None → 从 audio.queue 读
+        self._input_queue = input_queue
         self._asr = create_cloud_asr(config)
         self._final_text = ""
         self._capture_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._final_ready = threading.Event()  # ASR 返回 is_last 之后的最终结果时置位
+        self._done_emitted = threading.Event()
+        self._session_counter = itertools.count(1)
+        self._session_id = 0  # 当前会话 ID，用于区分新旧 ASR 回调
 
         bus.on("start", self._on_start)
         bus.on("stop", self._on_stop)
@@ -40,27 +44,28 @@ class StreamTranscriber:
     # --- 事件处理 ---
 
     def _on_start(self, _: Any) -> None:
+        self._session_id = next(self._session_counter)
+        sid = self._session_id
         self._final_text = ""
         self._stop_event.clear()
-        self._final_ready.clear()
+        self._done_emitted.clear()
 
-        # 建立 ASR WebSocket 连接
         try:
+            # 用闭包绑定 session_id，旧会话的回调不会干扰新会话
             self._asr.start_streaming(
-                on_partial=self._on_asr_partial,
-                on_sentence=self._on_asr_sentence,
+                on_partial=lambda text, s=sid: self._on_asr_partial(text, s),
+                on_sentence=lambda text, s=sid: self._on_asr_sentence(text, s),
             )
         except Exception as e:
             logger.error("流式 ASR 连接失败: %s", e)
-            self._bus.emit("state", {"status": "error", "text": "ASR 连接失败"})
+            self._bus.emit("state", {"status": "error", "text": "云端 ASR 连接失败，请检查网络或切换到本地 ASR"})
             self._bus.emit("done")
             return
 
-        # 热键模式：自己管音频采集；VAD 模式：音频由 VadKwsWakeup 管
         if self._input_queue is None:
             self._bus.emit("state", {"status": "recording"})
             self._audio.start()
-        logger.info("流式转录已启动")
+        logger.info("流式转录已启动 (session=%d)", sid)
 
         self._capture_thread = threading.Thread(
             target=self._capture_loop, daemon=True, name="StreamCapture",
@@ -74,25 +79,30 @@ class StreamTranscriber:
         if self._input_queue is None:
             self._audio.stop()
 
-        # 等待采集线程结束（会发 is_last）
-        if self._capture_thread and self._capture_thread.is_alive():
-            self._capture_thread.join(timeout=3.0)
-        self._capture_thread = None
+        self._bus.emit("state", {"status": "processing"})
+        # 短暂等待 sentence 回调，超时则用当前 partial 文字直接输出
+        sid = self._session_id
+        threading.Timer(_FINAL_WAIT, lambda: self._finish_if_current(sid)).start()
 
-        # 等待 ASR 返回最终结果（capture 线程发完 is_last 后，服务端会返回最终 sentence）
-        self._final_ready.wait(timeout=5.0)
+    def _finish_if_current(self, session_id: int) -> None:
+        """定时器触发：只有仍是当前会话才执行。"""
+        if session_id != self._session_id:
+            return
+        self._finish()
 
-        # 输出最终文本
-        text = self._final_text.strip()
-        if text:
-            logger.info("流式转录最终文本: %s", text[:80])
-            self._bus.emit("result", text)
+    def _finish(self) -> None:
+        if self._done_emitted.is_set():
+            return
+        self._done_emitted.set()
 
-        # 后台关闭 ASR 连接
+        final = self._final_text.strip()
+        if final:
+            logger.info("流式转录最终文本: %s", final[:80])
+            self._bus.emit("result", final)
+
         threading.Thread(
             target=self._close_asr, daemon=True, name="StreamASRClose",
         ).start()
-
         self._bus.emit("done")
 
     # --- 采集线程 ---
@@ -124,7 +134,6 @@ class StreamTranscriber:
 
         logger.info("采集线程退出，共发送 %d 个块", chunks_sent)
 
-        # 剩余帧作为最后一包
         if frames:
             chunk = np.concatenate(frames, axis=0)
             self._asr.send_frame(chunk.tobytes(), is_last=True)
@@ -133,19 +142,22 @@ class StreamTranscriber:
 
     # --- ASR 回调 ---
 
-    def _on_asr_partial(self, text: str) -> None:
+    def _on_asr_partial(self, text: str, session_id: int) -> None:
+        if session_id != self._session_id:
+            return  # 旧会话的回调，忽略
         if text:
             self._final_text = text
             if not self._stop_event.is_set():
                 self._bus.emit("partial", text)
 
-    def _on_asr_sentence(self, text: str) -> None:
+    def _on_asr_sentence(self, text: str, session_id: int) -> None:
+        if session_id != self._session_id:
+            return  # 旧会话的回调，忽略
         if text:
             self._final_text = text
-            logger.info("流式 ASR 句子确认: %s", text[:80])
-        # is_last 发出后收到的 sentence 就是最终结果
+            logger.info("流式 ASR 句子确认 (session=%d): %s", session_id, text[:80])
         if self._stop_event.is_set():
-            self._final_ready.set()
+            self._finish()
 
     # --- 清理 ---
 

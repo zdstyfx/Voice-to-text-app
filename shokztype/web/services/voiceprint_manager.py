@@ -35,7 +35,9 @@ def init_speaker(config: dict[str, Any]) -> None:
         _speaker_db = _speaker_processor._db
         logger.info("声纹模块初始化成功")
     except Exception as e:
+        import traceback
         logger.warning(f"声纹模块初始化失败（可能缺少模型）: {e}")
+        logger.warning(traceback.format_exc())
         _speaker_processor = None
         _speaker_db = None
 

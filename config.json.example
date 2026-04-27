@@ -1,5 +1,14 @@
 {
+  "asr": {
+    "backend": "local"
+  },
+  "wakeup": {
+    "method": "hotkey",
+    "hotkey": {
+      "combo": "f2"
+    }
+  },
   "cloud_asr": {
-    "api_key": "your-dashscope-api-key-here"
+    "api_key": ""
   }
 }

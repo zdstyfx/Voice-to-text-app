@@ -608,8 +608,8 @@ def _build_cli_parser():
 def main():
     # 配置日志（CLI模式，使用统一配置）
     # funasr_server作为独立脚本，日志保存到项目根目录的logs/
-    from shokztype import PROJECT_ROOT
-    log_dir = os.path.join(PROJECT_ROOT, "logs")
+    from shokztype import APP_DIR
+    log_dir = os.path.join(APP_DIR, "logs")
     setup_logging("INFO", log_dir)
     
     parser = _build_cli_parser()

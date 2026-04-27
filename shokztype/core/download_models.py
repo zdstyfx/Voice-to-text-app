@@ -41,8 +41,8 @@ def download_model(model_config, progress_callback=None):
 def main():
     """主函数：并行下载所有模型"""
     # 配置日志系统（使用统一配置）
-    from shokztype import PROJECT_ROOT
-    log_dir = os.path.join(PROJECT_ROOT, "logs")
+    from shokztype import APP_DIR
+    log_dir = os.path.join(APP_DIR, "logs")
     setup_logging("INFO", log_dir)
     
     # 从统一配置获取模型列表
@@ -141,26 +141,30 @@ if __name__ == "__main__":
 def get_model_cache_path(model_name, revision):
     """
     离线优先获取模型路径
-    1. 先检查本地缓存是否存在且完整
-    2. 如果本地存在，直接返回路径（避免联网）
-    3. 如果不存在，才调用 snapshot_download 进行下载
+    1. 先检查程序目录下的 models/ 文件夹（打包分发用）
+    2. 再检查 ~/.cache/modelscope/ 本地缓存
+    3. 都没有才联网下载
     """
     from pathlib import Path
+    from shokztype import APP_DIR
 
-    # 构建本地缓存路径（与Rust端保持一致）
+    short_name = model_name.split('/')[-1] if '/' in model_name else model_name
+
+    # 1. 检查程序目录下的 models/ 文件夹（打包分发）
+    bundled_dir = Path(APP_DIR) / "models" / short_name
+    if bundled_dir.exists():
+        logger.info(f"使用内置模型: {bundled_dir}")
+        return str(bundled_dir)
+
+    # 2. 检查 ~/.cache/modelscope/ 缓存
     home = Path.home()
     cache_base = home / ".cache" / "modelscope" / "hub" / "models" / "iic"
-
-    # 从完整模型名提取简短名称 (iic/xxx -> xxx)
-    short_name = model_name.split('/')[-1] if '/' in model_name else model_name
     model_dir = cache_base / short_name
 
-    # 检查模型是否已缓存
     if model_dir.exists():
         quant_file = model_dir / "model_quant.onnx"
         base_file = model_dir / "model.onnx"
 
-        # 只要有一个模型文件存在，就认为缓存有效
         if quant_file.exists() or base_file.exists():
             logger.info(f"使用本地缓存模型: {model_dir}")
             return str(model_dir)

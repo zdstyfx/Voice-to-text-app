@@ -13,6 +13,8 @@ from .audio_source import AudioSource
 
 logger = logging.getLogger(__name__)
 
+_IDLE_CLOSE_DELAY = 5.0  # 停止采集后延迟多久关闭硬件流（秒）
+
 
 class AudioCaptureError(Exception):
     pass
@@ -21,8 +23,8 @@ class AudioCaptureError(Exception):
 class AudioCapture(AudioSource):
     """sounddevice 麦克风采集。
 
-    音频流在构造时即打开（常开），start()/stop() 仅控制是否将帧入队，
-    避免热键模式下反复开关硬件流导致的启动延迟。
+    按需开流：start() 打开硬件流，stop() 后延迟关闭。
+    短时间内再次 start() 则复用已有流，避免重复开关的延迟。
     """
 
     def __init__(
@@ -37,41 +39,39 @@ class AudioCapture(AudioSource):
         self.device = device
         self._queue: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=queue_size)
         self._lock = threading.Lock()
-        self._capturing = False  # 是否正在采集（帧入队列）
+        self._capturing = False
+        self._stream: Optional[sd.RawInputStream] = None
+        self._close_timer: Optional[threading.Timer] = None
 
         self._block_size = int(self.sample_rate * self.block_ms / 1000)
-        # 预缓冲：始终保留最近帧，start() 时补入队列避免开头丢字
-        # 20 帧 × 20ms = 400ms，覆盖 ASR WebSocket 连接建立时间
         self._pre_buffer: collections.deque = collections.deque(maxlen=20)
         if self._block_size <= 0:
             raise ValueError("block_ms too small for selected sample rate")
-
-        # 流在构造时即打开，常驻运行
-        self._stream = self._open_stream(self.device)
-        self._stream.start()
-        logger.info(
-            "音频流已打开（常驻），采样率=%sHz，块大小=%s样本，设备=%s",
-            self.sample_rate, self._block_size, self._stream.device,
-        )
 
     @property
     def queue(self) -> "queue.Queue[np.ndarray]":
         return self._queue
 
     def get_pre_buffer(self) -> "np.ndarray | None":
-        """返回预缓冲中的音频拼接结果（供声纹验证等用途）。"""
         frames = list(self._pre_buffer)
         if not frames:
             return None
-        import numpy as np
         return np.concatenate(frames)
 
     def start(self) -> None:
         with self._lock:
             if self._capturing:
                 return
+            # 取消延迟关闭
+            if self._close_timer is not None:
+                self._close_timer.cancel()
+                self._close_timer = None
+            # 流没开则打开
+            if self._stream is None:
+                self._stream = self._open_stream(self.device)
+                self._stream.start()
+                logger.info("音频流已打开，设备=%s", self._stream.device)
             self.flush()
-            # 将预缓冲中的帧补入队列（最近 ~100ms）
             for frame in self._pre_buffer:
                 try:
                     self._queue.put_nowait(frame)
@@ -87,6 +87,28 @@ class AudioCapture(AudioSource):
                 return
             self._capturing = False
             logger.info("音频采集已停止")
+            # 延迟关闭硬件流：短时间内再 start 可复用
+            if self._close_timer is not None:
+                self._close_timer.cancel()
+            self._close_timer = threading.Timer(
+                _IDLE_CLOSE_DELAY, self._delayed_close,
+            )
+            self._close_timer.daemon = True
+            self._close_timer.start()
+
+    def _delayed_close(self) -> None:
+        with self._lock:
+            if self._capturing:
+                return  # 已经重新 start 了
+            if self._stream is not None:
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+                logger.info("音频流已关闭（空闲超时）")
+            self._close_timer = None
 
     @property
     def is_running(self) -> bool:
@@ -100,7 +122,6 @@ class AudioCapture(AudioSource):
                 break
 
     def reopen_stream(self) -> None:
-        """重新打开硬件流（PortAudio 重初始化后调用）。"""
         with self._lock:
             if self._stream is not None:
                 try:
@@ -113,7 +134,9 @@ class AudioCapture(AudioSource):
             logger.info("音频流已重新打开，设备=%s", self._stream.device)
 
     def cleanup(self) -> None:
-        """关闭硬件流（仅在 worker 销毁时调用）。"""
+        if self._close_timer is not None:
+            self._close_timer.cancel()
+            self._close_timer = None
         if self._stream is not None:
             try:
                 self._stream.stop()
@@ -123,7 +146,6 @@ class AudioCapture(AudioSource):
             self._stream = None
 
     def _open_stream(self, device) -> sd.RawInputStream:
-        # sounddevice 要求整数索引；字符串会被当作名称模式匹配
         if isinstance(device, str) and device.isdigit():
             device = int(device)
         try:
@@ -137,7 +159,6 @@ class AudioCapture(AudioSource):
             )
         except Exception as first_err:
             logger.warning("设备 %s 打开失败: %s，尝试刷新后回退", device, first_err)
-            # PortAudio 可能状态异常，先重新初始化
             try:
                 sd._terminate()
                 sd._initialize()
@@ -179,9 +200,9 @@ class AudioCapture(AudioSource):
         frame = np.frombuffer(in_data, dtype=np.int16).copy()
 
         if not self._capturing:
-            # 未采集时仍维护预缓冲，供 start() 时补入
             self._pre_buffer.append(frame)
             return
+
         try:
             self._queue.put_nowait(frame)
         except queue.Full:

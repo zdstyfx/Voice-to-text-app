@@ -3,11 +3,11 @@
 唯一的 audio.queue 读者。每帧都喂 KWS，激活后同时转发给转录模块。
 
 状态机：
-  IDLE   → KWS 命中 → ACTIVE（emit start，开始转发帧）
-  ACTIVE → KWS 命中结束词 / 超时 → IDLE（emit stop，停止转发）
+  IDLE    → KWS 命中开始词 → ACTIVE（emit start，开始转发帧）
+  ACTIVE  → KWS 命中结束词 / 超时 → LOCKED（emit stop，停止转发）
+  LOCKED  → 收到 done → IDLE（ASR 已完成，恢复监听）
 """
 
-import collections
 import logging
 import queue
 import threading
@@ -38,14 +38,18 @@ class VadKwsWakeup:
 
         kws_cfg = config.get("kws", {})
         self._active_timeout: float = kws_cfg.get("active_timeout_s", 30)
+        self._end_keywords: set[str] = set(
+            config.get("wakeup", {}).get("end_keywords", [])
+        )
 
-        self._state = "idle"  # "idle" | "active" | "stopped"
+        self._state = "idle"  # "idle" | "active" | "locked" | "stopped"
         self._active_since: float = 0.0
         self._running = threading.Event()
         self._main_thread: threading.Thread | None = None
 
-        # 转发队列：ACTIVE 时帧同时进这里，转录模块从这里读
         self.forward_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
+
+        bus.on("done", self._on_done)
 
     def start(self) -> None:
         self._state = "idle"
@@ -61,13 +65,14 @@ class VadKwsWakeup:
         self._state = "stopped"
         self._running.clear()
         self._audio.stop()
+        self._bus.off("done", self._on_done)
         if self._main_thread and self._main_thread.is_alive():
             self._main_thread.join(timeout=3.0)
         if self._kws:
             self._kws.cleanup()
             self._kws = None
 
-    # --- 主循环：唯一的帧读者 ---
+    # --- 主循环 ---
 
     def _main_loop(self) -> None:
         logger.info("VadKws 主循环已启动")
@@ -80,36 +85,36 @@ class VadKwsWakeup:
                 if self._state == "active":
                     if time.time() - self._active_since > self._active_timeout:
                         logger.info("KWS ACTIVE 超时 (%.0fs)", self._active_timeout)
-                        self._to_idle()
+                        self._to_locked()
                 continue
 
             if not isinstance(frame, np.ndarray):
                 frame = np.frombuffer(frame, dtype=np.int16)
 
-            # KWS 始终运行
             kws_result = self._kws.feed(frame) if self._kws else None
 
             if self._state == "idle":
-                if kws_result:
+                if kws_result and kws_result.keyword not in self._end_keywords:
                     logger.info("KWS 检测到开始词: %s", kws_result.keyword)
                     self._to_active()
 
             elif self._state == "active":
-                # 转发帧给转录模块
                 try:
                     self.forward_queue.put_nowait(frame)
                 except queue.Full:
                     pass
 
-                # 检测结束词
-                if kws_result:
+                if kws_result and kws_result.keyword in self._end_keywords:
                     logger.info("KWS 检测到结束词: %s", kws_result.keyword)
-                    self._to_idle()
+                    self._to_locked()
 
-                # 超时检查
                 if time.time() - self._active_since > self._active_timeout:
                     logger.info("KWS ACTIVE 超时 (%.0fs)", self._active_timeout)
-                    self._to_idle()
+                    self._to_locked()
+
+            elif self._state == "locked":
+                # 等待 done 解锁，期间继续读帧（不堵队列）但不转发也不检测
+                pass
 
         logger.info("VadKws 主循环已退出")
 
@@ -120,7 +125,6 @@ class VadKwsWakeup:
         self._active_since = time.time()
         if self._kws:
             self._kws.reset()
-        # 清空转发队列
         while not self.forward_queue.empty():
             try:
                 self.forward_queue.get_nowait()
@@ -129,9 +133,17 @@ class VadKwsWakeup:
         self._bus.emit("state", {"status": "active"})
         self._bus.emit("start")
 
-    def _to_idle(self) -> None:
-        self._state = "idle"
+    def _to_locked(self) -> None:
+        """停止转发，等 ASR 完成后才回到 idle。"""
+        self._state = "locked"
         if self._kws:
             self._kws.reset()
         self._bus.emit("stop")
-        self._bus.emit("state", {"status": "idle"})
+        self._bus.emit("state", {"status": "processing"})
+
+    def _on_done(self, _: Any) -> None:
+        """ASR 完成，解锁回到 idle。"""
+        if self._state == "locked":
+            self._state = "idle"
+            self._bus.emit("state", {"status": "idle"})
+            logger.info("KWS 解锁，回到 IDLE")

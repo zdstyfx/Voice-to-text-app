@@ -55,9 +55,8 @@ _config_path: str | None = None
 def _resolve_config_path(path: str | None = None) -> str:
     if path:
         return os.path.abspath(path)
-    from shokztype import PROJECT_ROOT
-    project_root = PROJECT_ROOT
-    return os.path.join(project_root, "config.json")
+    from shokztype import APP_DIR
+    return os.path.join(APP_DIR, "config.json")
 
 
 def load_config(path: str | None = None) -> dict[str, Any]:
