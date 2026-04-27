@@ -1,11 +1,27 @@
+# Python
 __pycache__/
 *.egg-info/
+*.pyc
 .venv/
+.pytest_cache/
+
+# Runtime data
 config.json
 speaker_db.json
-_kws_input.txt
-docs/
-.superpowers/
-.vscode/
 logs/
+*.wav
+
+# KWS temp
+_kws_input.txt
+
+# Packaging (PyInstaller)
+packaging/build/
+packaging/dist/
+
+# IDE / tools
+.vscode/
+.superpowers/
+docs/
+
+# Test artifacts
 _test_*

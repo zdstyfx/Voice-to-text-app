@@ -32,6 +32,7 @@ async def call_llm(config: dict[str, Any], prompt: str) -> dict[str, Any]:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
+        "enable_thinking": False,
     }
 
     try:

@@ -46,49 +46,60 @@ _device_switch_lock = threading.Lock()
 # 系统浮窗（独立进程，UDP 通信）
 # ---------------------------------------------------------------------------
 
-_OVERLAY_PORT = 9123
+_overlay_port: int = 0
 _overlay_proc: subprocess.Popen | None = None
 _overlay_sock: socket.socket | None = None
 
 
+def _allocate_udp_port() -> int:
+    """让 OS 分配一个空闲 UDP 端口。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def _start_overlay():
-    global _overlay_proc, _overlay_sock
+    global _overlay_proc, _overlay_sock, _overlay_port
     try:
+        _overlay_port = _allocate_udp_port()
         if getattr(sys, 'frozen', False):
-            # PyInstaller 打包模式：用 exe 自身的 --overlay 入口
-            cmd = [sys.executable, "--overlay", "--port", str(_OVERLAY_PORT)]
+            cmd = [sys.executable, "--overlay", "--port", str(_overlay_port)]
         else:
-            # 开发模式：直接跑 overlay_process.py
             script = os.path.join(os.path.dirname(__file__), "overlay_process.py")
-            cmd = [sys.executable, script, "--port", str(_OVERLAY_PORT)]
+            cmd = [sys.executable, script, "--port", str(_overlay_port)]
         _overlay_proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         _overlay_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        logger.info("浮窗进程已启动 (PID=%d)", _overlay_proc.pid)
+        logger.info("浮窗进程已启动 (PID=%d, port=%d)", _overlay_proc.pid, _overlay_port)
     except Exception as e:
         logger.warning("浮窗启动失败: %s", e)
 
 
 def _stop_overlay():
-    global _overlay_proc, _overlay_sock
+    global _overlay_proc, _overlay_sock, _overlay_port
     if _overlay_proc:
         try:
             _overlay_proc.terminate()
+            _overlay_proc.wait(timeout=3)
         except Exception:
-            pass
+            try:
+                _overlay_proc.kill()
+            except Exception:
+                pass
         _overlay_proc = None
     if _overlay_sock:
         _overlay_sock.close()
         _overlay_sock = None
+    _overlay_port = 0
 
 
 def _push_overlay(status: str, text: str | None = None):
-    if _overlay_sock is None:
+    if _overlay_sock is None or _overlay_port == 0:
         return
     try:
         msg = json.dumps({"status": status, "text": text}, ensure_ascii=False)
-        _overlay_sock.sendto(msg.encode("utf-8"), ("127.0.0.1", _OVERLAY_PORT))
+        _overlay_sock.sendto(msg.encode("utf-8"), ("127.0.0.1", _overlay_port))
     except Exception:
         pass
 
@@ -639,17 +650,17 @@ def _swap_wakeup(config: dict) -> None:
 
 
 def restart_pipeline() -> dict:
-    global _ready, _init_error, _active_device_id, _overlay_proc, _overlay_sock
+    global _ready, _init_error, _active_device_id
+    global _overlay_proc, _overlay_sock, _overlay_port
 
     config = get_config()
-    # 如果已经在 "saving" 状态（来自 config_changed），不覆盖
     if _ui_state.get("status") != "saving":
         _set_state("switching")
 
-    saved_proc, saved_sock = _overlay_proc, _overlay_sock
-    _overlay_proc, _overlay_sock = None, None
+    saved_proc, saved_sock, saved_port = _overlay_proc, _overlay_sock, _overlay_port
+    _overlay_proc, _overlay_sock, _overlay_port = None, None, 0
     stop_pipeline()
-    _overlay_proc, _overlay_sock = saved_proc, saved_sock
+    _overlay_proc, _overlay_sock, _overlay_port = saved_proc, saved_sock, saved_port
 
     _ready = False
     _init_error = None

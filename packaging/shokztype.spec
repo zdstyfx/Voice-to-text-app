@@ -44,6 +44,8 @@ a = Analysis(
         (str(ROOT / "config.json.example"), "."),
         # KWS 关键词
         (str(ROOT / "keywords.txt"), "."),
+        # 图标
+        (str(ROOT / "shokztype" / "assets" / "shokztype.ico"), "shokztype/assets"),
         # librosa stub 文件（funasr_onnx 依赖）
         (str(site_pkg / "librosa" / "__init__.pyi"), "librosa"),
         (str(site_pkg / "librosa" / "core" / "__init__.pyi"), "librosa/core"),
@@ -78,13 +80,16 @@ a = Analysis(
         "librosa",
         "soundfile",
         "engineio.async_drivers.threading",
+        # 系统托盘
+        "pystray",
+        "pystray._win32",
+        "PIL",
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
         "matplotlib",
-        "PIL",
         "tkinter.test",
         "test",
     ],
@@ -107,8 +112,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,  # UPX 压缩有时会破坏 DLL
-    console=True,  # 保留控制台便于调试，发布版改 False
-    icon=None,  # 可以加 .ico 图标
+    console=False,
+    icon=str(ROOT / "shokztype" / "assets" / "shokztype.ico"),
 )
 
 # ---------------------------------------------------------------------------

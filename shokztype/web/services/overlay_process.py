@@ -12,7 +12,7 @@ import threading
 import tkinter as tk
 import tkinter.font as tkfont
 
-UDP_PORT = 9123
+UDP_PORT = 0  # 由父进程通过 --port 参数传入
 
 STYLES = {
     "loading":    {"bg": "#27272a", "fg": "#71717a", "text": "● 加载中..."},
