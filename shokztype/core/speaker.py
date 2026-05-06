@@ -36,6 +36,9 @@ class SpeakerProcessor:
         self._incremental_margin = spk_cfg.get("incremental_margin", 0.10)
         self._max_embeddings = spk_cfg.get("max_embeddings", 50)
         db_path = spk_cfg.get("db_path", "speaker_db.json")
+        if not os.path.isabs(db_path):
+            from shokztype import DATA_DIR
+            db_path = os.path.join(DATA_DIR, db_path)
 
         # Load speaker database
         self._db = SpeakerDB(db_path)

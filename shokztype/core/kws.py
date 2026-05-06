@@ -23,9 +23,16 @@ class KwsDetector:
     def __init__(self, config: Dict[str, Any]) -> None:
         import sherpa_onnx
 
+        from shokztype import APP_DIR
+
         kws_cfg = config.get("kws", {})
         model_dir = kws_cfg.get("model_dir", "")
         keywords_file = kws_cfg.get("keywords_file", "keywords.txt")
+
+        if model_dir and not os.path.isabs(model_dir):
+            model_dir = os.path.join(APP_DIR, model_dir)
+        if keywords_file and not os.path.isabs(keywords_file):
+            keywords_file = os.path.join(APP_DIR, keywords_file)
 
         encoder = os.path.join(model_dir, "encoder-epoch-13-avg-2-chunk-16-left-64.onnx")
         decoder = os.path.join(model_dir, "decoder-epoch-13-avg-2-chunk-16-left-64.onnx")

@@ -3,19 +3,26 @@ import logging
 import os
 import re
 
-import keyboard
 from fastapi import APIRouter, Request
 
 from shokztype.web.web_config import get_config, update_config
+from shokztype.core.hotkeys import PersistentKeyListener, MODIFIER_KEYS
 from shokztype import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-from shokztype import APP_DIR
+from shokztype import APP_DIR, DATA_DIR
 _PROJECT_ROOT = PROJECT_ROOT
-_KEYWORDS_PATH = os.path.join(APP_DIR, "keywords.txt")
+_KEYWORDS_PATH = os.path.join(DATA_DIR, "keywords.txt")
+
+# 首次运行：从 APP_DIR 复制 keywords.txt 到可写目录
+if DATA_DIR != APP_DIR and not os.path.exists(_KEYWORDS_PATH):
+    _src = os.path.join(APP_DIR, "keywords.txt")
+    if os.path.exists(_src):
+        import shutil
+        shutil.copy2(_src, _KEYWORDS_PATH)
 
 
 def _get_tokens_path() -> str:
@@ -200,42 +207,57 @@ async def add_start_keyword(request: Request) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 热键录制
+# 热键录制（通过 PersistentKeyListener 的 hooks 机制）
 # ---------------------------------------------------------------------------
+
+from pynput.keyboard import Key as _Key
+
+_CTRL_KEYS = frozenset({_Key.ctrl, _Key.ctrl_l, _Key.ctrl_r})
+_ALT_KEYS = frozenset({_Key.alt, _Key.alt_l, _Key.alt_r})
+_SHIFT_KEYS = frozenset({_Key.shift, _Key.shift_l, _Key.shift_r})
+
 
 @router.post("/api/wakeup/record-hotkey")
 async def record_hotkey() -> dict:
+    pkl = PersistentKeyListener.get()
     loop = asyncio.get_event_loop()
     future: asyncio.Future = loop.create_future()
+    active_modifiers: set = set()
 
-    def on_key(event: keyboard.KeyboardEvent):
-        if event.event_type != keyboard.KEY_DOWN:
+    def on_press(key):
+        if key in MODIFIER_KEYS:
+            active_modifiers.add(key)
             return
-        if event.name in ("ctrl", "alt", "shift", "left ctrl", "right ctrl",
-                          "left alt", "right alt", "left shift", "right shift",
-                          "left windows", "right windows"):
-            return
+
         parts = []
-        if keyboard.is_pressed("ctrl"):
+        if active_modifiers & _CTRL_KEYS:
             parts.append("Ctrl")
-        if keyboard.is_pressed("alt"):
+        if active_modifiers & _ALT_KEYS:
             parts.append("Alt")
-        if keyboard.is_pressed("shift"):
+        if active_modifiers & _SHIFT_KEYS:
             parts.append("Shift")
-        key_name = event.name
-        if len(key_name) == 1:
-            key_name = key_name.upper()
+
+        if hasattr(key, 'char') and key.char:
+            key_name = key.char.upper()
+        elif hasattr(key, 'name'):
+            key_name = key.name
+        else:
+            key_name = str(key)
         parts.append(key_name)
         combo = "+".join(parts)
-        keyboard.unhook(hook)
+
+        pkl.clear_hooks()
         if not future.done():
             loop.call_soon_threadsafe(future.set_result, combo)
 
-    hook = keyboard.hook(on_key)
+    def on_release(key):
+        active_modifiers.discard(key)
+
+    pkl.set_hooks(on_press, on_release)
 
     try:
         combo = await asyncio.wait_for(future, timeout=10)
         return {"success": True, "combo": combo}
     except asyncio.TimeoutError:
-        keyboard.unhook(hook)
+        pkl.clear_hooks()
         return {"success": False, "error": "超时：10秒内未检测到按键"}

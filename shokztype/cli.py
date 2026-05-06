@@ -9,9 +9,10 @@ import sys
 import threading
 import time
 
-import keyboard
+from pynput import keyboard as pynput_keyboard
 
 from shokztype.core import HotkeyManager, TranscriptionResult, TranscriptionWorker, load_config, type_text
+from shokztype.core.platform import get_chinese_font as _get_chinese_font
 from shokztype.core.plugins.dataset_recorder import wrap_result_handler
 from shokztype.core.logging_config import setup_logging
 
@@ -46,7 +47,7 @@ class RecordingOverlay:
         label = tk.Label(
             root,
             text="  \u25cf  \u5f55\u97f3\u4e2d...  ",
-            font=("Microsoft YaHei UI", 13, "bold"),
+            font=(_get_chinese_font(), 13, "bold"),
             fg="white",
             bg="#CC0000",
             padx=14,
@@ -375,7 +376,12 @@ def _run_f2_mode(args, config, output_method, append_newline, audio_source) -> N
     toggle_combo = config["hotkeys"].get("toggle", "f2")
 
     try:
-        keyboard.on_release_key(toggle_combo, lambda _: _toggle(worker), suppress=False)
+        from shokztype.core.hotkeys import _normalize_combo
+        normalized = _normalize_combo(toggle_combo)
+        hotkey_listener = pynput_keyboard.GlobalHotKeys({normalized: lambda: _toggle(worker)})
+        hotkey_listener.daemon = True
+        hotkey_listener.start()
+
         mode_hint = "UDP" if audio_source is not None else "麦克风"
         logger.info("Speak Keyboard 启动完成（%s模式），按 %s 开始/停止录音，按 Ctrl+C 退出", mode_hint, toggle_combo)
         try:
@@ -391,7 +397,8 @@ def _run_f2_mode(args, config, output_method, append_newline, audio_source) -> N
             input("按 Enter 停止并退出...")
             _toggle(worker)
         else:
-            keyboard.wait()
+            import threading
+            threading.Event().wait()
     except KeyboardInterrupt:
         logger.info("用户中断，正在退出...")
     except Exception as exc:

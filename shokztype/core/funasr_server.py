@@ -56,9 +56,11 @@ class FunASRServer:
             self.device,
         )
 
-        # 设置信号处理
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
+        # 设置信号处理（仅主线程可注册）
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, self._signal_handler)
+            signal.signal(signal.SIGINT, self._signal_handler)
 
     def __del__(self):
         """析构函数，确保释放模型资源"""

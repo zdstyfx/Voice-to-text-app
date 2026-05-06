@@ -9,7 +9,7 @@ uvicorn[standard]>=0.24.0
 httpx>=0.25.0
 
 # --- 音频采集与处理 ---
-comtypes>=1.4.0
+comtypes>=1.4.0; sys_platform == "win32"
 sounddevice==0.5.2
 soundfile==0.13.1
 librosa==0.11.0
@@ -31,11 +31,14 @@ fireredvad
 sherpa-onnx>=1.10.0
 
 # --- 系统交互 ---
-keyboard==0.13.5
+pynput>=1.7.6
 pyperclip==1.11.0
 pywebview>=5.0
 pystray>=0.19.0
 Pillow>=10.0
+
+# --- macOS 文字注入 ---
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 
 # --- 可选：云端 ASR (DashScope) ---
 # dashscope
@@ -46,4 +49,5 @@ Pillow>=10.0
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 # - dashscope 为云端 ASR 可选依赖，不使用云端识别可不装
 # - 首次运行会自动下载模型（FunASR ~500MB, CAM++ ~27MB, FireRedVAD ~10MB）
+# - macOS 需在「系统设置 → 隐私与安全 → 辅助功能」中授权终端/应用
 # ============================================================

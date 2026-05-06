@@ -130,9 +130,14 @@ async def stop_enroll_recording() -> dict:
 
 @router.put("/api/voiceprint/active")
 async def set_active(req: SetActiveProfilesRequest) -> dict:
+    from shokztype.web.services.event_bus import bus
+
     active = voiceprint_manager.set_active_profiles(req.profile_ids)
-    update_config({"voiceprint": {"activeProfiles": active}})
-    return {"success": True, "activeProfiles": active}
+    enabled = bool(active)
+    vp_update = {"voiceprint": {"enabled": enabled, "activeProfiles": active}}
+    update_config(vp_update)
+    bus.emit("config_changed", vp_update)
+    return {"success": True, "activeProfiles": active, "enabled": enabled}
 
 
 @router.post("/api/voiceprint/toggle")
@@ -143,14 +148,13 @@ async def toggle_voiceprint() -> dict:
     currently_enabled = config.get("voiceprint", {}).get("enabled", False)
 
     if not currently_enabled:
-        profiles = voiceprint_manager.list_profiles()
-        complete = [p["id"] for p in profiles if p.get("enrollment_complete")]
-        if not complete:
-            return {"success": False, "error": "请先录制至少一个声纹档案后再开启"}
-        vp_update = {"voiceprint": {"enabled": True, "activeProfiles": complete}}
+        active = config.get("voiceprint", {}).get("activeProfiles", [])
+        if not active:
+            return {"success": False, "error": "请先选择要启用的声纹档案"}
+        vp_update = {"voiceprint": {"enabled": True, "activeProfiles": active}}
         update_config(vp_update)
         bus.emit("config_changed", vp_update)
-        return {"success": True, "enabled": True, "activeProfiles": complete}
+        return {"success": True, "enabled": True, "activeProfiles": active}
 
     vp_update = {"voiceprint": {"enabled": False, "activeProfiles": []}}
     update_config(vp_update)

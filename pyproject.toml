@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "shokztype"
 version = "0.1.0"
-description = "Chinese voice-to-text for Windows"
+description = "Chinese voice-to-text for Windows and macOS"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.104.0",
@@ -22,11 +22,13 @@ dependencies = [
     "addict",
     "fireredvad",
     "sherpa-onnx>=1.10.0",
-    "keyboard==0.13.5",
+    "pynput>=1.7.6",
     "pyperclip==1.11.0",
     "pywebview>=5.0",
     "pystray>=0.19.0",
     "Pillow>=10.0",
+    "comtypes>=1.4.0; sys_platform=='win32'",
+    "pyobjc-framework-Quartz>=10.0; sys_platform=='darwin'",
 ]
 
 [project.scripts]

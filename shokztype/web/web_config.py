@@ -55,8 +55,14 @@ _config_path: str | None = None
 def _resolve_config_path(path: str | None = None) -> str:
     if path:
         return os.path.abspath(path)
-    from shokztype import APP_DIR
-    return os.path.join(APP_DIR, "config.json")
+    from shokztype import DATA_DIR, APP_DIR
+    data_cfg = os.path.join(DATA_DIR, "config.json")
+    app_cfg = os.path.join(APP_DIR, "config.json")
+    # 优先用可写目录的配置；首次运行从 APP_DIR 复制到 DATA_DIR
+    if not os.path.exists(data_cfg) and os.path.exists(app_cfg) and DATA_DIR != APP_DIR:
+        import shutil
+        shutil.copy2(app_cfg, data_cfg)
+    return data_cfg if DATA_DIR != APP_DIR else app_cfg
 
 
 def load_config(path: str | None = None) -> dict[str, Any]:

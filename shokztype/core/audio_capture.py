@@ -44,7 +44,7 @@ class AudioCapture(AudioSource):
         self._close_timer: Optional[threading.Timer] = None
 
         self._block_size = int(self.sample_rate * self.block_ms / 1000)
-        self._pre_buffer: collections.deque = collections.deque(maxlen=20)
+        self._pre_buffer: collections.deque = collections.deque(maxlen=50)
         if self._block_size <= 0:
             raise ValueError("block_ms too small for selected sample rate")
 

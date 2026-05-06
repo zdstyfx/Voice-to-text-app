@@ -1,10 +1,9 @@
-"""热键唤醒模块：监听 F2 切换录音状态。"""
+"""热键唤醒模块：监听快捷键切换录音状态 (pynput / helper 子进程)。"""
 
 import logging
 import threading
 
-import keyboard
-
+from shokztype.core.hotkeys import PersistentKeyListener
 from shokztype.web.services.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -23,16 +22,18 @@ class HotkeyWakeup:
 
     def start(self) -> None:
         self._running.set()
-        keyboard.add_hotkey(self._combo, self._on_press, suppress=True)
+        pkl = PersistentKeyListener.get()
+        pkl.set_hotkey(self._combo, self._on_press)
+        if pkl._use_helper:
+            pkl.start_helper(self._combo)
         logger.info("热键唤醒已启动 (combo=%s)", self._combo)
 
     def stop(self) -> None:
         self._running.clear()
         self._bus.off("done", self._on_done)
-        try:
-            keyboard.remove_hotkey(self._combo)
-        except (KeyError, ValueError):
-            pass
+        pkl = PersistentKeyListener.get()
+        pkl.clear_hotkey()
+        pkl._stop_helper()
         self._active = False
         self._locked = False
 

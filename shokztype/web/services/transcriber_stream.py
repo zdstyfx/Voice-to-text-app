@@ -50,21 +50,24 @@ class StreamTranscriber:
         self._stop_event.clear()
         self._done_emitted.clear()
 
+        # 先启动音频采集（利用 pre-buffer 保留热键前的音频）
+        if self._input_queue is None:
+            self._bus.emit("state", {"status": "recording"})
+            self._audio.start()
+
         try:
-            # 用闭包绑定 session_id，旧会话的回调不会干扰新会话
             self._asr.start_streaming(
                 on_partial=lambda text, s=sid: self._on_asr_partial(text, s),
                 on_sentence=lambda text, s=sid: self._on_asr_sentence(text, s),
             )
         except Exception as e:
             logger.error("流式 ASR 连接失败: %s", e)
+            if self._input_queue is None:
+                self._audio.stop()
             self._bus.emit("state", {"status": "error", "text": "云端 ASR 连接失败，请检查网络或切换到本地 ASR"})
             self._bus.emit("done")
             return
 
-        if self._input_queue is None:
-            self._bus.emit("state", {"status": "recording"})
-            self._audio.start()
         logger.info("流式转录已启动 (session=%d)", sid)
 
         self._capture_thread = threading.Thread(

@@ -2,17 +2,17 @@
 
 启动方式：python -m shokztype.web.services.overlay_process [--port 9123]
 主进程通过 UDP 发送 JSON 消息来更新显示。
+
+Windows: tkinter 实现
+macOS: PyObjC NSWindow 实现
 """
 
-import ctypes
 import json
 import socket
 import sys
 import threading
-import tkinter as tk
-import tkinter.font as tkfont
 
-UDP_PORT = 0  # 由父进程通过 --port 参数传入
+UDP_PORT = 0
 
 STYLES = {
     "loading":    {"bg": "#27272a", "fg": "#71717a", "text": "● 加载中..."},
@@ -33,14 +33,172 @@ PAD_Y = 10
 CORNER_RADIUS = 16
 
 
-class OverlayWindow:
+def _hex_to_rgb(hex_color: str):
+    h = hex_color.lstrip("#")
+    return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+
+
+# ---------------------------------------------------------------------------
+# macOS: PyObjC NSWindow overlay
+# ---------------------------------------------------------------------------
+
+class OverlayWindowMac:
     def __init__(self, port: int = UDP_PORT):
+        from AppKit import (
+            NSApplication, NSWindow, NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered, NSFloatingWindowLevel,
+            NSTextField, NSFont, NSColor, NSView,
+            NSMakeRect, NSScreen,
+        )
+        from Quartz import CGColorCreateGenericRGB
+
         self._port = port
+        self._running = True
+        self._pending = None
+
+        self._app = NSApplication.sharedApplication()
+        self._app.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
+
+        screen = NSScreen.mainScreen()
+        screen_frame = screen.frame()
+        self._screen_w = screen_frame.size.width
+        self._screen_h = screen_frame.size.height
+
+        win_w = 200
+        win_h = 36
+        x = (self._screen_w - win_w) / 2
+        y = TASKBAR_MARGIN
+
+        self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(x, y, win_w, win_h),
+            NSWindowStyleMaskBorderless,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._window.setLevel_(NSFloatingWindowLevel)
+        self._window.setOpaque_(False)
+        self._window.setBackgroundColor_(NSColor.clearColor())
+        self._window.setAlphaValue_(0.88)
+        self._window.setHasShadow_(True)
+        self._window.setIgnoresMouseEvents_(True)
+
+        self._bg_view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, win_w, win_h))
+        self._bg_view.setWantsLayer_(True)
+        bg_layer = self._bg_view.layer()
+        bg_layer.setCornerRadius_(CORNER_RADIUS)
+        bg_layer.setMasksToBounds_(True)
+
+        r, g, b = _hex_to_rgb(STYLES["loading"]["bg"])
+        bg_layer.setBackgroundColor_(CGColorCreateGenericRGB(r, g, b, 1.0))
+
+        self._window.setContentView_(self._bg_view)
+
+        self._label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, win_w, win_h))
+        self._label.setEditable_(False)
+        self._label.setBordered_(False)
+        self._label.setDrawsBackground_(False)
+        self._label.setAlignment_(1)  # NSTextAlignmentCenter
+        self._label.setFont_(NSFont.fontWithName_size_("PingFang SC", 13))
+
+        fr, fg_val, fb = _hex_to_rgb(STYLES["loading"]["fg"])
+        self._label.setTextColor_(NSColor.colorWithRed_green_blue_alpha_(fr, fg_val, fb, 1.0))
+        self._label.setStringValue_(STYLES["loading"]["text"])
+
+        self._bg_view.addSubview_(self._label)
+        self._window.orderFront_(None)
+
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(("127.0.0.1", self._port))
+        self._sock.settimeout(0.3)
+
+        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        self._thread.start()
+
+    def _recv_loop(self):
+        while self._running:
+            try:
+                data, _ = self._sock.recvfrom(8192)
+                msg = json.loads(data.decode("utf-8"))
+                self._pending = msg
+                self._schedule_update()
+            except socket.timeout:
+                continue
+            except Exception:
+                continue
+
+    def _schedule_update(self):
+        from PyObjCTools import AppHelper
+        AppHelper.callAfter(self._apply_pending)
+
+    def _apply_pending(self):
+        if self._pending:
+            msg = self._pending
+            self._pending = None
+            self._apply(msg)
+
+    def _apply(self, msg: dict):
+        from AppKit import NSColor, NSMakeRect
+        from Quartz import CGColorCreateGenericRGB
+
+        status = msg.get("status", "loading")
+        text = msg.get("text")
+        style = STYLES.get(status, STYLES["loading"])
+
+        display = text or style["text"]
+        r, g, b = _hex_to_rgb(style["bg"])
+        fr, fg_val, fb = _hex_to_rgb(style["fg"])
+
+        self._label.setStringValue_(display)
+        self._label.setTextColor_(NSColor.colorWithRed_green_blue_alpha_(fr, fg_val, fb, 1.0))
+        self._label.sizeToFit()
+
+        full_label_w = self._label.frame().size.width + PAD_X * 2
+        label_h = self._label.frame().size.height
+        max_w = self._screen_w * MAX_WIDTH_RATIO
+        win_w = max(min(full_label_w, max_w), 140)
+        win_h = 36
+
+        x = (self._screen_w - win_w) / 2
+        y = TASKBAR_MARGIN
+        label_y = (win_h - label_h) / 2
+
+        overflow = full_label_w > win_w
+        if overflow:
+            # 文字超长：右对齐，显示最新内容
+            label_x = win_w - full_label_w
+            actual_label_w = full_label_w
+        else:
+            # 短文本：水平居中
+            label_x = 0
+            actual_label_w = win_w
+
+        self._window.setFrame_display_(NSMakeRect(x, y, win_w, win_h), True)
+        self._bg_view.setFrame_(NSMakeRect(0, 0, win_w, win_h))
+        self._label.setFrame_(NSMakeRect(label_x, label_y, actual_label_w, label_h))
+
+        bg_layer = self._bg_view.layer()
+        bg_layer.setBackgroundColor_(CGColorCreateGenericRGB(r, g, b, 1.0))
+
+    def run(self):
+        from PyObjCTools import AppHelper
+        AppHelper.runEventLoop()
+
+
+# ---------------------------------------------------------------------------
+# Windows: tkinter overlay (original)
+# ---------------------------------------------------------------------------
+
+class OverlayWindowTk:
+    def __init__(self, port: int = UDP_PORT):
+        import tkinter as tk
+        import tkinter.font as tkfont
+
+        self._port = port
+        self._tk = tk
         self._root = tk.Tk()
         self._root.overrideredirect(True)
         self._root.attributes("-topmost", True)
         self._root.attributes("-alpha", 0.88)
-        # 透明色作为窗口背景，用于圆角效果
         self._transparent = "#010101"
         self._root.configure(bg=self._transparent)
         self._root.attributes("-transparentcolor", self._transparent)
@@ -62,9 +220,7 @@ class OverlayWindow:
         )
         self._canvas.pack(fill=tk.X)
 
-        # 圆角矩形背景
         self._bg_id = None
-        # 居中文本
         self._text_id = self._canvas.create_text(
             0, self._canvas_h // 2,
             text="  Shokz Type  ",
@@ -76,7 +232,6 @@ class OverlayWindow:
         self._root.update_idletasks()
         self._apply({"status": "loading"})
 
-        # UDP 接收线程
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind(("127.0.0.1", self._port))
         self._sock.settimeout(0.5)
@@ -118,17 +273,12 @@ class OverlayWindow:
         self._root.geometry(f"+{x}+{y}")
 
     def _draw_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
-        """在 Canvas 上画圆角矩形。"""
         points = [
-            x1 + r, y1,
-            x2 - r, y1,
+            x1 + r, y1, x2 - r, y1,
             x2, y1, x2, y1 + r,
-            x2, y2 - r,
-            x2, y2, x2 - r, y2,
-            x1 + r, y2,
-            x1, y2, x1, y2 - r,
-            x1, y1 + r,
-            x1, y1, x1 + r, y1,
+            x2, y2 - r, x2, y2, x2 - r, y2,
+            x1 + r, y2, x1, y2, x1, y2 - r,
+            x1, y1 + r, x1, y1, x1 + r, y1,
         ]
         return self._canvas.create_polygon(points, smooth=True, **kwargs)
 
@@ -141,7 +291,6 @@ class OverlayWindow:
         bg = style["bg"]
         fg = style["fg"]
 
-        # 计算文本宽度
         text_w = self._font.measure(display) + PAD_X * 2
         win_w = min(text_w, self._max_w)
         win_w = max(win_w, 140)
@@ -149,7 +298,6 @@ class OverlayWindow:
         self._canvas.config(width=win_w, bg=self._transparent)
         self._root.configure(bg=self._transparent)
 
-        # 重绘圆角背景
         if self._bg_id:
             self._canvas.delete(self._bg_id)
         self._bg_id = self._draw_rounded_rect(
@@ -158,13 +306,10 @@ class OverlayWindow:
         )
         self._canvas.tag_lower(self._bg_id)
 
-        # 文本居中
         if text_w > self._max_w:
-            # 超长文本：右对齐显示最新内容
             self._canvas.coords(self._text_id, win_w - PAD_X, self._canvas_h // 2)
             self._canvas.itemconfig(self._text_id, text=display, fill=fg, anchor="e")
         else:
-            # 正常：居中
             self._canvas.coords(self._text_id, win_w // 2, self._canvas_h // 2)
             self._canvas.itemconfig(self._text_id, text=display, fill=fg, anchor="center")
 
@@ -175,6 +320,7 @@ class OverlayWindow:
         if not self._running:
             return
         try:
+            import ctypes
             HWND_TOPMOST = -1
             SWP_NOMOVE = 0x0002
             SWP_NOSIZE = 0x0001
@@ -196,6 +342,16 @@ class OverlayWindow:
 
     def run(self):
         self._root.mainloop()
+
+
+# ---------------------------------------------------------------------------
+# 工厂函数
+# ---------------------------------------------------------------------------
+
+def OverlayWindow(port: int = UDP_PORT):
+    if sys.platform == "darwin":
+        return OverlayWindowMac(port=port)
+    return OverlayWindowTk(port=port)
 
 
 if __name__ == "__main__":

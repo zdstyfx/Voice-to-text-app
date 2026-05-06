@@ -293,10 +293,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
     <details class="section">
       <summary><span>&#128100; 声纹</span></summary>
       <div class="section-body">
-        <div class="toggle" style="margin-bottom:12px">
-          <input type="checkbox" id="vp-toggle">
-          <span>启用声纹过滤</span>
-        </div>
+        <p style="font-size:12px;color:var(--ink2);margin:0 0 8px">勾选档案即启用声纹过滤，取消全部则关闭</p>
         <ul class="profile-list" id="vp-profiles"></ul>
         <button class="btn btn-outline btn-sm" onclick="startCreateProfile()" style="margin-top:8px" id="btn-add-vp">+ 添加声纹</button>
       </div>
@@ -514,22 +511,20 @@ function populateVoiceprint(vp) {
   state.activeProfiles = vp.activeProfiles || [];
   state.sentences = vp.sentences || [];
   state.vpEnabled = vp.enabled;
-  document.getElementById('vp-toggle').checked = vp.enabled;
   renderProfiles();
 }
 
 function renderProfiles() {
   const el = document.getElementById('vp-profiles');
   if (state.profiles.length === 0) {
-    el.innerHTML = '<li style="color:var(--ink2);font-size:13px;padding:8px 0">暂无声纹档案</li>';
+    el.innerHTML = '<li style="color:var(--ink2);font-size:13px;padding:8px 0">暂无声纹档案，请先添加</li>';
     document.getElementById('btn-add-vp').style.display = '';
     return;
   }
-  const disabled = !state.vpEnabled;
   el.innerHTML = state.profiles.map(p => `
     <li class="profile-item">
-      <div class="profile-info" style="${disabled ? 'opacity:.45;pointer-events:none' : ''}">
-        ${state.vpEnabled && p.enrollment_complete
+      <div class="profile-info">
+        ${p.enrollment_complete
           ? `<input type="checkbox" class="profile-check" ${state.activeProfiles.includes(p.id) ? 'checked' : ''} onchange="toggleProfile('${p.id}', this.checked)">`
           : ''
         }
@@ -653,17 +648,6 @@ async function saveSettings() {
 }
 
 // --- 声纹 ---
-document.getElementById('vp-toggle').addEventListener('change', async function() {
-  const resp = await api('/api/voiceprint/toggle', 'POST');
-  if (!resp.success) {
-    this.checked = false;
-    toast(resp.error || '操作失败');
-    return;
-  }
-  state.vpEnabled = this.checked;
-  state.activeProfiles = resp.activeProfiles || state.activeProfiles;
-  renderProfiles();
-});
 
 async function startCreateProfile() {
   const name = prompt('输入声纹名称（如"我"、"同事A"）：');
@@ -684,8 +668,8 @@ async function deleteProfile(id) {
   const resp = await api(`/api/voiceprint/profiles/${id}`, 'DELETE');
   if (resp.voiceprint_disabled) {
     state.vpEnabled = false;
-    document.getElementById('vp-toggle').checked = false;
-    toast('已删除，无可用声纹档案，声纹已自动关闭');
+    state.activeProfiles = [];
+    toast('已删除，声纹过滤已自动关闭');
   } else {
     toast('已删除');
   }
@@ -699,13 +683,14 @@ async function toggleProfile(id, checked) {
   let active = [...state.activeProfiles];
   if (checked && !active.includes(id)) active.push(id);
   if (!checked) active = active.filter(a => a !== id);
-  if (active.length === 0) {
-    toast('至少需要选择一个声纹档案');
-    renderProfileSelect();  // 恢复 checkbox 状态
-    return;
-  }
-  await api('/api/voiceprint/active', 'PUT', { profile_ids: active });
+  const resp = await api('/api/voiceprint/active', 'PUT', { profile_ids: active });
   state.activeProfiles = active;
+  state.vpEnabled = resp.enabled;
+  if (active.length === 0) {
+    toast('声纹过滤已关闭');
+  } else if (checked && active.length === 1) {
+    toast('声纹过滤已开启');
+  }
 }
 
 function resumeEnroll(id, step) {
@@ -861,27 +846,53 @@ async function saveWakeup() {
   }
 }
 
-// --- 热键录制（后端系统级监听） ---
+// --- 热键录制（WebView 内键盘事件） ---
 async function startRecordHotkey() {
   const el = document.getElementById('hotkey-display');
   if (state.recordingHotkey) return;
   state.recordingHotkey = true;
   el.classList.add('recording');
+  el.dataset.prev = el.textContent || 'F2';
   el.textContent = '请按下热键...';
 
-  const resp = await api('/api/wakeup/record-hotkey', 'POST');
-  el.classList.remove('recording');
-  state.recordingHotkey = false;
+  const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta', 'Fn']);
+  const finish = () => {
+    clearTimeout(timer);
+    document.removeEventListener('keydown', onKeyDown, true);
+    el.classList.remove('recording');
+    state.recordingHotkey = false;
+  };
+  const normalizeKey = (event) => {
+    if (event.key === ' ') return 'Space';
+    if (event.key === 'Esc') return 'Escape';
+    if (event.key.length === 1) return event.key.toUpperCase();
+    return event.key;
+  };
+  const onKeyDown = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (modifierKeys.has(event.key)) return;
 
-  if (resp.success) {
-    el.textContent = resp.combo;
-    // 录制成功后自动保存
+    const parts = [];
+    if (event.ctrlKey) parts.push('Ctrl');
+    if (event.altKey) parts.push('Alt');
+    if (event.shiftKey) parts.push('Shift');
+    if (event.metaKey) parts.push('Cmd');
+    parts.push(normalizeKey(event));
+
+    finish();
+    el.textContent = parts.join('+');
     await saveWakeup();
-    toast('热键已切换: ' + resp.combo);
-  } else {
-    el.textContent = document.getElementById('hotkey-display').dataset.prev || 'F2';
-    toast(resp.error || '录制失败');
-  }
+    toast('热键已切换: ' + el.textContent);
+  };
+  const timer = setTimeout(() => {
+    finish();
+    el.textContent = el.dataset.prev || 'F2';
+    toast('超时：10秒内未检测到按键');
+  }, 10000);
+
+  document.addEventListener('keydown', onKeyDown, true);
+  window.focus();
 }
 
 // --- SSE 设备监听 ---

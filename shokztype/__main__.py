@@ -84,61 +84,124 @@ def _load_icon_image(icon_path: str):
 
 
 def _run_with_tray(host: str, port: int):
-    """启动 pywebview 窗口 + pystray 系统托盘。"""
+    """启动 pywebview 窗口 + 系统托盘（Windows）/ Dock 模式（macOS）。"""
+    import sys
+
     _set_windows_app_user_model_id()
+
     ico_path = _get_icon_path()
 
     import webview
-    import pystray
 
     really_quit = threading.Event()
     window_ref = [None]
-
-    def on_closing():
-        if really_quit.is_set():
-            return True
-        window_ref[0].hide()
-        return False
-
-    def tray_show(icon, item):
-        window_ref[0].show()
-
-    def tray_quit(icon, item):
-        really_quit.set()
-        icon.stop()
-        window_ref[0].destroy()
 
     url = f"http://{host}:{port}"
     window = webview.create_window(
         "Shokz Type", url, width=460, height=720, resizable=True,
     )
-    window.events.closing += on_closing
     window_ref[0] = window
 
-    def _bring_to_front():
-        import ctypes
-        hwnd = ctypes.windll.user32.FindWindowW(None, "Shokz Type")
-        if hwnd:
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
+    if sys.platform == "darwin":
+        # macOS: 关闭窗口只隐藏，Cmd+Q / Dock 右键退出才真正退出
+        def on_closing():
+            if really_quit.is_set():
+                return True
+            window_ref[0].hide()
+            return False
 
-    def _on_shown():
-        threading.Timer(0.5, _bring_to_front).start()
+        window.events.closing += on_closing
 
-    window.events.shown += _on_shown
+        def _patch_dock_handlers():
+            import objc
+            from AppKit import NSApplication
 
-    tray_image = _load_icon_image(ico_path)
-    menu = pystray.Menu(
-        pystray.MenuItem("显示窗口", tray_show, default=True),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("退出 ShokzType", tray_quit),
-    )
-    icon = pystray.Icon("ShokzType", tray_image, "Shokz Type", menu)
-    icon.run_detached()
+            app = NSApplication.sharedApplication()
+            delegate = app.delegate()
+            if delegate is None:
+                return
+            cls = delegate.__class__
 
-    webview.start(icon=ico_path)
+            def reopen(self, app, flag):
+                if window_ref[0]:
+                    window_ref[0].show()
+                return True
 
-    if not really_quit.is_set():
-        icon.stop()
+            sel = b'applicationShouldHandleReopen:hasVisibleWindows:'
+            imp = objc.selector(reopen, selector=sel, signature=b'Z@:@Z')
+            objc.classAddMethod(cls, sel, imp)
+
+            def should_terminate(self, sender):
+                really_quit.set()
+                from shokztype.web.services.recording_pipeline import stop_pipeline
+                stop_pipeline()
+                return 1  # NSTerminateNow
+
+            sel_term = b'applicationShouldTerminate:'
+            imp_term = objc.selector(should_terminate, selector=sel_term, signature=b'I@:@')
+            objc.classAddMethod(cls, sel_term, imp_term)
+
+        def _deferred_patch():
+            _log = logging.getLogger("shokztype.deferred")
+            _log.info("deferred_patch 线程已启动")
+            import time
+            time.sleep(3)
+            try:
+                from PyObjCTools import AppHelper
+                _log.info("正在安装 Dock handler...")
+                AppHelper.callAfter(_patch_dock_handlers)
+                _log.info("已调度 Dock handler 安装")
+            except Exception as e:
+                _log.error("deferred patch 失败: %s", e, exc_info=True)
+
+        threading.Thread(target=_deferred_patch, daemon=True).start()
+
+        webview.start(icon=ico_path)
+
+    else:
+        # Windows: pystray 系统托盘
+        import pystray
+
+        def on_closing():
+            if really_quit.is_set():
+                return True
+            window_ref[0].hide()
+            return False
+
+        def tray_show(icon, item):
+            window_ref[0].show()
+
+        def tray_quit(icon, item):
+            really_quit.set()
+            icon.stop()
+            window_ref[0].destroy()
+
+        window.events.closing += on_closing
+
+        def _bring_to_front():
+            import ctypes
+            hwnd = ctypes.windll.user32.FindWindowW(None, "Shokz Type")
+            if hwnd:
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+
+        def _on_shown():
+            threading.Timer(0.5, _bring_to_front).start()
+
+        window.events.shown += _on_shown
+
+        tray_image = _load_icon_image(ico_path)
+        menu = pystray.Menu(
+            pystray.MenuItem("显示窗口", tray_show, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("退出 ShokzType", tray_quit),
+        )
+        icon = pystray.Icon("ShokzType", tray_image, "Shokz Type", menu)
+        icon.run_detached()
+
+        webview.start(icon=ico_path)
+
+        if not really_quit.is_set():
+            icon.stop()
 
     from shokztype.web.services.recording_pipeline import _stop_overlay
     _stop_overlay()
@@ -160,14 +223,47 @@ def main():
         OverlayWindow(port=port).run()
         return
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    if "--hotkey-helper" in sys.argv:
+        _port, _combo = 0, "f2"
+        for i, a in enumerate(sys.argv):
+            if a == "--port" and i + 1 < len(sys.argv):
+                _port = int(sys.argv[i + 1])
+            elif a == "--combo" and i + 1 < len(sys.argv):
+                _combo = sys.argv[i + 1]
+        if _port:
+            from shokztype.core.hotkey_helper import run_helper
+            run_helper(_port, _combo)
+        return
+
+    import sys as _sys2
+    if getattr(_sys2, 'frozen', False):
+        from shokztype.core.hotkeys import _runtime_log_dir
+        _log_dir = _runtime_log_dir(_sys2.executable)
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        _log_path = _log_dir / "shokztype.log"
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            filename=_log_path,
+            filemode="w",
+        )
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        )
+
+    import sys as _sys
+    if _sys.platform == "darwin":
+        from shokztype.core.platform import ensure_mac_accessibility
+        ensure_mac_accessibility()
 
     from shokztype.web.services.recording_pipeline import init_worker, _stop_overlay
     init_worker()
     atexit.register(_stop_overlay)
+
+    from shokztype.core.hotkeys import PersistentKeyListener
+    PersistentKeyListener.get().start()
 
     import uvicorn
     from shokztype.web.server import create_app
@@ -205,9 +301,15 @@ def main():
     try:
         _run_with_tray(args.host, args.port)
     except Exception:
-        import traceback, os, sys
-        crash_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else "."
-        with open(os.path.join(crash_dir, "crash.log"), "w", encoding="utf-8") as f:
+        import traceback, sys
+        if getattr(sys, "frozen", False):
+            from shokztype.core.hotkeys import _runtime_log_dir
+            crash_dir = _runtime_log_dir(sys.executable)
+            crash_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            from pathlib import Path
+            crash_dir = Path(".")
+        with open(crash_dir / "crash.log", "w", encoding="utf-8") as f:
             traceback.print_exc(file=f)
         raise
 

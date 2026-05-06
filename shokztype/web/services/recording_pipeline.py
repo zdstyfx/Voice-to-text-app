@@ -491,7 +491,7 @@ def init_worker() -> None:
 
     _start_overlay()
     import time
-    time.sleep(0.3)
+    time.sleep(1.0 if getattr(sys, 'frozen', False) else 0.3)
     _set_state("loading")
     print("[init] overlay 已启动")
 
@@ -534,6 +534,16 @@ def init_worker() -> None:
     print("[init] 全部完成，准备启动 Web 服务")
 
 
+def _ensure_overlay_synced():
+    """打包环境下 overlay 子进程启动较慢，定时重发当前状态确保同步。"""
+    import time
+    for _ in range(5):
+        time.sleep(1)
+        status = _ui_state.get("status", "ready")
+        _push_overlay(status, _ui_state.get("text"))
+    logger.info("overlay 状态同步完成: %s", _ui_state.get("status"))
+
+
 def start_pipeline(event_loop: asyncio.AbstractEventLoop) -> None:
     global _loop, _active_device_id, _preferred_endpoint_id
     _loop = event_loop
@@ -552,6 +562,8 @@ def start_pipeline(event_loop: asyncio.AbstractEventLoop) -> None:
     device_monitor.register_on_portaudio_refresh(_on_portaudio_refresh)
 
     logger.info("事件循环已绑定，活跃设备: %s", _active_device_id)
+
+    threading.Thread(target=_ensure_overlay_synced, daemon=True, name="OverlaySync").start()
 
 
 def stop_pipeline() -> None:
