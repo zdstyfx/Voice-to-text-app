@@ -92,8 +92,6 @@ def _get_ep_map() -> dict[str, str]:
 
 def list_devices() -> list[dict[str, Any]]:
     """列出所有可用的音频输入设备。"""
-    if IS_MACOS:
-        _refresh_portaudio()
     devices = sd.query_devices()
     default_input = sd.default.device[0]
 

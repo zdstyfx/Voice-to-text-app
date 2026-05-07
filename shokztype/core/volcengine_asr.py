@@ -167,7 +167,7 @@ class VolcEngineASR:
         self._resource_id = str(
             volc_cfg.get("resource_id", "")
             or cloud_volc_cfg.get("resource_id", "")
-            or "volc.bigasr.sauc.duration"
+            or "volc.seedasr.sauc.duration"
         )
         cloud_cfg = config.get("cloud_asr", {})
         self._sample_rate = cloud_cfg.get("sample_rate", 16000)

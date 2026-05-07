@@ -313,7 +313,7 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
         </div>
         <div id="vad-section" style="display:none;margin-top:16px">
           <label style="font-weight:600;font-size:14px">开始关键词（唤醒词）</label>
-          <p style="font-size:12px;color:var(--ink2);margin-bottom:8px">说出这些词从 IDLE 切换到 ACTIVE，开始转录</p>
+          <p style="font-size:12px;color:var(--ink2);margin-bottom:8px">说出这些词从 IDLE 切换到 ACTIVE，开始转写</p>
           <ul id="start-kw-list" style="list-style:none;margin-bottom:8px"></ul>
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
             <input type="text" id="new-start-kw" placeholder="输入唤醒词，如：你好小韶" style="flex:1">
@@ -412,7 +412,7 @@ function renderModes() {
   document.getElementById('mode-grid').innerHTML = state.modes.map(m => `
     <div class="mode-card ${m.id === state.currentMode ? 'active' : ''}" onclick="setMode('${m.id}')">
       <div class="icon">${icons[m.id] || ''}</div>
-      <div class="name">${m.id === 'transcribe' ? '转写' : m.name}</div>
+      <div class="name">${m.name}</div>
       <div class="desc">${m.description}</div>
     </div>
   `).join('');

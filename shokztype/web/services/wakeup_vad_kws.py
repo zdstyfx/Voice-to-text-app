@@ -77,6 +77,7 @@ class VadKwsWakeup:
     def _main_loop(self) -> None:
         logger.info("VadKws 主循环已启动")
         audio_queue = self._audio.queue
+        _frame_count = 0
 
         while self._running.is_set():
             try:
@@ -90,6 +91,12 @@ class VadKwsWakeup:
 
             if not isinstance(frame, np.ndarray):
                 frame = np.frombuffer(frame, dtype=np.int16)
+
+            _frame_count += 1
+            if _frame_count % 250 == 1:  # 每 5 秒一次
+                rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
+                logger.info("VadKws frame#%d dtype=%s shape=%s RMS=%.0f qsize=%d",
+                            _frame_count, frame.dtype, frame.shape, rms, audio_queue.qsize())
 
             kws_result = self._kws.feed(frame) if self._kws else None
 

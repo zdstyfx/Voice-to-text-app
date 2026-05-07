@@ -7,7 +7,7 @@ router = APIRouter()
 MODES = [
     ModeItem(id="translate", name="翻译", description="将 ASR 文本翻译成目标语言", usesLLM=True),
     ModeItem(id="polish", name="润色", description="整理 ASR 文本为更自然的表达", usesLLM=True),
-    ModeItem(id="transcribe", name="转录", description="直接返回转录文本", usesLLM=False),
+    ModeItem(id="transcribe", name="转写", description="直接返回转写文本", usesLLM=False),
 ]
 VALID_MODE_IDS = {m.id for m in MODES}
 

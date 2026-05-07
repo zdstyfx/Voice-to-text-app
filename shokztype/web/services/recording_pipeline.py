@@ -281,36 +281,28 @@ def get_preferred_endpoint_id() -> str | None:
 
 
 def _handle_device_switch(new_device_id: str, current_devices: list) -> None:
-    if not _device_switch_lock.acquire(blocking=False):
-        logger.info("设备切换已在进行中，跳过")
-        return
-    try:
-        global _active_device_id
-        logger.info("切换到设备 #%s", new_device_id)
-        update_config({"audio": {"device": new_device_id}})
-        _active_device_id = new_device_id
-        threading.Thread(
-            target=_do_device_switch_restart, daemon=True, name="DeviceSwitchRestart",
-        ).start()
-    except Exception:
-        _device_switch_lock.release()
-        raise
+    """设备切换：只更新配置和设备 ID，不重启管线/不创建音频流。"""
+    global _active_device_id
+    logger.info("设备已切换到 #%s（仅更新配置）", new_device_id)
+    update_config({"audio": {"device": new_device_id}})
+    _active_device_id = new_device_id
+    # 如果当前正在录音，重新打开流到新设备
+    if _audio is not None and _audio.is_running:
+        try:
+            _audio.device = new_device_id
+            _audio.reopen_stream()
+            logger.info("录音流已切换到新设备")
+        except Exception as e:
+            logger.warning("切换设备流失败: %s", e)
 
 
 def _on_portaudio_refresh() -> None:
     """PortAudio 重初始化后重建音频流。"""
-    if _audio is not None:
+    if _audio is not None and _audio.is_running:
         try:
             _audio.reopen_stream()
         except Exception as e:
             logger.warning("重建音频流失败: %s", e)
-
-
-def _do_device_switch_restart() -> None:
-    try:
-        restart_pipeline()
-    finally:
-        _device_switch_lock.release()
 
 
 # ---------------------------------------------------------------------------

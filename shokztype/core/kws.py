@@ -79,6 +79,8 @@ class KwsDetector:
 
         # 自动增益归一化：麦克风音量差异很大，统一到模型期望的 RMS 水平
         rms = float(np.sqrt(np.mean(samples ** 2)))
+        if self._total_samples % (self._sample_rate * 2) < len(samples):
+            logger.debug("KWS feed RMS=%.4f samples=%d", rms, len(samples))
         if rms > 1e-6:
             gain = self._TARGET_RMS / rms
             # 限制增益倍数，避免静音时噪声爆炸
