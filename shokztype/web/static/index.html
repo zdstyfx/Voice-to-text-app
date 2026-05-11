@@ -192,6 +192,17 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
   .mode-card { padding-left: 24px; padding-right: 24px; }
   .row { flex-direction: column; }
 }
+
+/* History */
+.history-item { padding: 10px 12px; margin-bottom: 8px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); }
+.history-item-text { font-size: 13px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; word-break: break-all; }
+.history-item-footer { display: flex; align-items: center; justify-content: space-between; }
+.history-item-meta { display: flex; align-items: center; gap: 6px; }
+.history-mode-badge { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 4px; background: rgba(13,148,136,.1); color: var(--accent); letter-spacing: .3px; }
+.history-item-time { font-size: 10px; color: var(--ink3); }
+.history-copy-btn { font-size: 11px; padding: 3px 10px; background: transparent; border: 1px solid var(--border2); border-radius: 6px; color: var(--ink3); cursor: pointer; transition: all .15s; }
+.history-copy-btn:hover { background: var(--surface-hover); color: var(--ink); }
+.history-empty { text-align: center; padding: 24px 0; color: var(--ink3); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -329,6 +340,18 @@ textarea { min-height: 100px; resize: vertical; font-family: "Cascadia Code", "F
           </div>
         </div>
         <button class="btn btn-primary btn-sm" onclick="saveWakeup()" style="margin-top:12px">保存唤醒设置</button>
+      </div>
+    </details>
+
+    <!-- 5. 历史记录 -->
+    <details class="section" id="section-history" onToggle="if(this.open) renderHistory()">
+      <summary><span>&#128337; 历史记录</span></summary>
+      <div class="section-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:12px;color:var(--ink3)" id="history-count">0 条记录</span>
+          <button class="btn btn-danger btn-sm" onclick="clearHistory()">清空</button>
+        </div>
+        <div id="history-list"></div>
       </div>
     </details>
   </div>
@@ -544,7 +567,7 @@ function populateWakeup(w) {
   document.querySelectorAll('[name="wakeup-method"]').forEach(r => {
     r.checked = r.value === w.method;
   });
-  document.getElementById('hotkey-display').textContent = w.hotkey_combo || 'F2';
+  document.getElementById('hotkey-display').textContent = w.hotkey_combo || 'Ctrl+Shift+Space';
   state.startKeywords = w.start_keywords || [];
   state.endKeywords = w.end_keywords || ['退出', '取消', '再见'];
   renderStartKeywords();
@@ -852,7 +875,7 @@ async function startRecordHotkey() {
   if (state.recordingHotkey) return;
   state.recordingHotkey = true;
   el.classList.add('recording');
-  el.dataset.prev = el.textContent || 'F2';
+  el.dataset.prev = el.textContent || 'Ctrl+Shift+Space';
   el.textContent = '请按下热键...';
 
   const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta', 'Fn']);
@@ -887,12 +910,83 @@ async function startRecordHotkey() {
   };
   const timer = setTimeout(() => {
     finish();
-    el.textContent = el.dataset.prev || 'F2';
+    el.textContent = el.dataset.prev || 'Ctrl+Shift+Space';
     toast('超时：10秒内未检测到按键');
   }, 10000);
 
   document.addEventListener('keydown', onKeyDown, true);
   window.focus();
+}
+
+// --- 历史记录 ---
+const HISTORY_KEY = 'shokztype_history';
+const HISTORY_MAX = 100;
+const MODE_LABELS = { translate: '翻译', polish: '润色', transcribe: '转写' };
+
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+}
+
+function saveHistoryItem(text, mode) {
+  const items = loadHistory();
+  items.unshift({ text, mode: mode || 'transcribe', ts: Date.now() });
+  if (items.length > HISTORY_MAX) items.length = HISTORY_MAX;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+  const countEl = document.getElementById('history-count');
+  if (countEl) countEl.textContent = items.length + ' 条记录';
+}
+
+function renderHistory() {
+  const items = loadHistory();
+  const el = document.getElementById('history-list');
+  const countEl = document.getElementById('history-count');
+  if (!el) return;
+  if (countEl) countEl.textContent = items.length + ' 条记录';
+  if (!items.length) {
+    el.innerHTML = '<div class="history-empty">暂无记录</div>';
+    return;
+  }
+  el.innerHTML = items.map((item, i) => {
+    const d = new Date(item.ts);
+    const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const label = MODE_LABELS[item.mode] || item.mode;
+    return `<div class="history-item">
+      <div class="history-item-text">${item.text.replace(/</g,'&lt;')}</div>
+      <div class="history-item-footer">
+        <div class="history-item-meta">
+          <span class="history-mode-badge">${label}</span>
+          <span class="history-item-time">${time}</span>
+        </div>
+        <button class="history-copy-btn" onclick="copyHistoryItem(${i})">复制</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function copyHistoryItem(index) {
+  const items = loadHistory();
+  if (items[index]) {
+    navigator.clipboard.writeText(items[index].text).then(() => toast('已复制'));
+  }
+}
+
+function clearHistory() {
+  localStorage.removeItem(HISTORY_KEY);
+  renderHistory();
+}
+
+// --- SSE 录音流 ---
+function initRecordingSSE() {
+  const es = new EventSource(API + '/api/recording/stream');
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.event === 'result' && data.text) {
+        saveHistoryItem(data.text, state.currentMode);
+      }
+    } catch {}
+  };
+  es.onerror = () => { setTimeout(initRecordingSSE, 3000); es.close(); };
 }
 
 // --- SSE 设备监听 ---
@@ -933,6 +1027,7 @@ function initDeviceSSE() {
   state.devices = devices.devices || [];
   updateBottomInfo(settings, state.devices);
   initDeviceSSE();
+  initRecordingSSE();
 })();
 </script>
 </body>

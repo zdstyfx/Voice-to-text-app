@@ -240,8 +240,20 @@ async def _process_and_output(text: str, config: dict, mode: str) -> None:
 def _do_output(text: str, config: dict) -> None:
     output_cfg = config.get("output", {})
     append_newline = output_cfg.get("append_newline", False)
+    # 先通知前端最终结果（用于历史记录），再注入文字
+    _broadcast_result(text)
     type_text(text, append_newline=append_newline, method="type")
     logger.info("已输出: %s", text[:50])
+
+
+def _broadcast_result(text: str) -> None:
+    """向前端广播最终输出文字（event: result），供历史面板记录。"""
+    msg = json.dumps({"event": "result", "text": text}, ensure_ascii=False)
+    for queue in list(_state_clients):
+        try:
+            queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            pass
 
 
 # ---------------------------------------------------------------------------

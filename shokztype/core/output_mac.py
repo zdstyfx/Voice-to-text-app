@@ -51,12 +51,23 @@ def try_clipboard_injection(payload: str) -> bool:
     except Exception as exc:
         logger.debug("剪贴板注入失败: %s", exc)
         success = False
-    finally:
+        # 注入失败时立即恢复
         if prev_clip is not None:
             try:
                 pyperclip.copy(prev_clip)
             except Exception:
                 pass
+        return False
+
+    # 注入成功：延迟恢复，等目标 App 完成 Cmd+V 粘贴后再覆盖剪贴板
+    if prev_clip is not None:
+        import threading
+        def _restore():
+            try:
+                pyperclip.copy(prev_clip)
+            except Exception:
+                pass
+        threading.Timer(0.5, _restore).start()
 
     return success
 

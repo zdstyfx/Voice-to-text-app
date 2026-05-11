@@ -125,7 +125,7 @@ async def save_wakeup(request: Request) -> dict:
     update_data = {
         "wakeup": {
             "method": body.get("method", "hotkey"),
-            "hotkey": {"combo": body.get("hotkey_combo", "f2")},
+            "hotkey": {"combo": body.get("hotkey_combo", "ctrl+shift+space")},
         }
     }
     end_keywords_changed = False

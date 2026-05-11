@@ -38,7 +38,7 @@ WEB_EXTRA_DEFAULTS: dict[str, Any] = {
     },
     "wakeup": {
         "method": "hotkey",
-        "hotkey": {"combo": "f2"},
+        "hotkey": {"combo": "ctrl+shift+space"},
         "vad": {"keyword": ""},
     },
 }
