@@ -17,6 +17,34 @@ class KwsResult:
     timestamp: float  # 检测时刻（秒，相对于 feed 累计帧数）
 
 
+def _safe_ascii_path(path: str, dest_name: str) -> str:
+    """如果路径含非 ASCII 字符（如中文），自动复制到 ~/.shokztype/ 并返回 ASCII 路径。
+
+    对 keywords.txt 每次都同步（文件小且可能变化）；
+    对模型目录仅在目标不存在时复制（避免重复拷贝大文件）。
+    """
+    try:
+        path.encode("ascii")
+        return path  # 纯 ASCII，无需处理
+    except UnicodeEncodeError:
+        pass
+
+    import shutil
+    safe_base = os.path.expanduser("~/.shokztype")
+    dest = os.path.join(safe_base, dest_name)
+    os.makedirs(safe_base, exist_ok=True)
+
+    if os.path.isdir(path):
+        if not os.path.exists(dest):
+            logger.info("KWS 模型路径含中文，复制到 %s", dest)
+            shutil.copytree(path, dest)
+    else:
+        logger.debug("KWS 文件路径含中文，同步到 %s", dest)
+        shutil.copy2(path, dest)
+
+    return dest
+
+
 class KwsDetector:
     """流式关键词检测器，封装 sherpa-onnx KeywordSpotter。"""
 
@@ -34,6 +62,10 @@ class KwsDetector:
         if keywords_file and not os.path.isabs(keywords_file):
             keywords_file = os.path.join(APP_DIR, keywords_file)
 
+        # 自动处理含中文的路径（sherpa-onnx C++ 层不支持 Unicode 路径）
+        model_dir = _safe_ascii_path(model_dir, "kws-model")
+        keywords_file = _safe_ascii_path(keywords_file, "keywords.txt")
+
         encoder = os.path.join(model_dir, "encoder-epoch-13-avg-2-chunk-16-left-64.onnx")
         decoder = os.path.join(model_dir, "decoder-epoch-13-avg-2-chunk-16-left-64.onnx")
         joiner = os.path.join(model_dir, "joiner-epoch-13-avg-2-chunk-16-left-64.onnx")
@@ -44,6 +76,9 @@ class KwsDetector:
                 raise FileNotFoundError(f"KWS model file not found: {f}")
         if not os.path.isfile(keywords_file):
             raise FileNotFoundError(f"Keywords file not found: {keywords_file}")
+        with open(keywords_file, "r", encoding="utf-8") as _f:
+            if not _f.read().strip():
+                raise ValueError(f"Keywords file is empty: {keywords_file}")
 
         self._kws = sherpa_onnx.KeywordSpotter(
             tokens=tokens,

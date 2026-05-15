@@ -23,7 +23,7 @@ async def call_llm(config: dict[str, Any], prompt: str) -> dict[str, Any]:
     if not base_url or not api_key or not model:
         return {"success": False, "text": "", "error": "LLM 配置不完整（缺少 apiBaseUrl/apiKey/model）"}
 
-    url = f"{base_url}/v1/chat/completions"
+    url = f"{base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",

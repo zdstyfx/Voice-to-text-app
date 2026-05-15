@@ -98,7 +98,7 @@ def _run_with_tray(host: str, port: int):
 
     url = f"http://{host}:{port}"
     window = webview.create_window(
-        "Shokz Type", url, width=460, height=720, resizable=True,
+        "Shokz Type", url, width=1280, height=800, resizable=True,
     )
     window_ref[0] = window
 
@@ -207,12 +207,126 @@ def _run_with_tray(host: str, port: int):
     _stop_overlay()
 
 
+def _run_diagnose() -> None:
+    """运行启动诊断并将报告写入日志文件（--diagnose 模式）。
+
+    用途：用户反馈 app 无法启动时，让他们运行 ShokzType.exe --diagnose
+    并把生成的 diagnose_report.txt 发回来，方便定位缺失依赖。
+    """
+    import sys
+    import traceback
+    from pathlib import Path
+
+    # 诊断报告写到可写目录
+    if getattr(sys, "frozen", False):
+        out_dir = Path(sys.executable).parent
+    else:
+        out_dir = Path(__file__).resolve().parents[1]
+
+    report_path = out_dir / "diagnose_report.txt"
+
+    lines: list[str] = []
+
+    def log(s: str = "") -> None:
+        lines.append(s)
+        print(s)
+
+    log("=" * 60)
+    log("  ShokzType 启动诊断报告")
+    log("=" * 60)
+    log(f"Python: {sys.version}")
+    log(f"Platform: {sys.platform}")
+    log(f"Frozen: {getattr(sys, 'frozen', False)}")
+    log(f"Executable: {sys.executable}")
+    log()
+
+    # 每个条目：(label, import_path_or_callable)
+    checks: list[tuple[str, str]] = [
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"),
+        ("sounddevice", "sounddevice"),
+        ("soundfile", "soundfile"),
+        ("librosa", "librosa"),
+        ("pynput", "pynput"),
+        ("pywebview", "webview"),
+        ("pystray", "pystray"),
+        ("PIL (Pillow)", "PIL"),
+        ("sherpa_onnx", "sherpa_onnx"),
+        ("funasr_onnx", "funasr_onnx"),
+        ("fireredvad", "fireredvad"),
+        ("onnxruntime", "onnxruntime"),
+        ("torch", "torch"),
+        ("torchaudio", "torchaudio"),
+        ("modelscope", "modelscope"),
+        ("psutil", "psutil"),
+        ("pyperclip", "pyperclip"),
+    ]
+
+    if sys.platform == "win32":
+        checks += [("comtypes", "comtypes"), ("pynput._win32 keyboard", "pynput.keyboard._win32")]
+    elif sys.platform == "darwin":
+        checks += [("AppKit (PyObjC)", "AppKit"), ("Quartz (PyObjC)", "Quartz")]
+
+    log("── 依赖导入检查 ──")
+    fails = 0
+    for label, mod in checks:
+        try:
+            __import__(mod)
+            log(f"  [PASS] {label}")
+        except Exception:
+            tb = traceback.format_exc().strip().splitlines()[-1]
+            log(f"  [FAIL] {label}  →  {tb}")
+            fails += 1
+
+    log()
+    log("── 关键文件检查 ──")
+
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", sys.executable))
+        exe_dir = Path(sys.executable).parent
+
+        file_checks: list[tuple[str, Path, bool]] = [
+            ("shokztype/web/static/index.html", meipass / "shokztype" / "web" / "static" / "index.html", True),
+            ("shokztype/assets/shokztype.ico", meipass / "shokztype" / "assets" / "shokztype.ico", True),
+            ("overlay_process.py", meipass / "shokztype" / "web" / "services" / "overlay_process.py", True),
+            ("config.json", exe_dir / "config.json", True),
+            ("keywords.txt", exe_dir / "keywords.txt", False),
+        ]
+        for label, path, required in file_checks:
+            marker = "[PASS]" if path.is_file() else ("[FAIL]" if required else "[WARN]")
+            if not path.is_file() and required:
+                fails += 1
+            log(f"  {marker} {label}  ({path})")
+
+    log()
+    log(f"── 汇总: {'PASS' if fails == 0 else f'FAIL ({fails} 项)'} ──")
+    log()
+    log(f"报告已写入: {report_path}")
+
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+    # 打包模式下让窗口停留（否则 console=False 时一闪而过）
+    if getattr(sys, "frozen", False):
+        input("\n按 Enter 键退出...")
+
+
 def main():
     import sys, os
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w")
+
+    if "--diagnose" in sys.argv:
+        _run_diagnose()
+        return
+
+    if "--download-models" in sys.argv:
+        # frozen 模式下 asr.py 用 sys.executable --download-models 启动此分支，
+        # 替代无法在 PyInstaller exe 里使用的 python -m 方式
+        from shokztype.core.download_models import main as _dl_main
+        _dl_main()
+        return
 
     if "--overlay" in sys.argv:
         port = 0
@@ -259,7 +373,7 @@ def main():
         ensure_mac_accessibility()
 
     from shokztype.web.services.recording_pipeline import init_worker, _stop_overlay
-    init_worker()
+    init_worker(no_overlay="--no-overlay" in sys.argv)
     atexit.register(_stop_overlay)
 
     from shokztype.core.hotkeys import PersistentKeyListener
@@ -274,6 +388,8 @@ def main():
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--overlay", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-overlay", action="store_true",
+                        help="不启动浮窗进程（网页开发测试用）")
     parser.add_argument("--no-window", action="store_true",
                         help="仅启动 HTTP 服务，不弹桌面窗口")
     args = parser.parse_args()
@@ -297,6 +413,14 @@ def main():
     server_thread.start()
 
     _wait_for_server(args.host, args.port)
+
+    # Server 已就绪，关闭 splash screen，webview 紧接着打开——用户感知无缝衔接。
+    # 非 frozen / macOS 环境下 pyi_splash 不存在，ImportError 静默忽略即可。
+    try:
+        import pyi_splash  # type: ignore[import]
+        pyi_splash.close()
+    except ImportError:
+        pass
 
     try:
         _run_with_tray(args.host, args.port)

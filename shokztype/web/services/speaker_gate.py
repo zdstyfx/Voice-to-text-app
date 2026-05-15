@@ -10,6 +10,7 @@
 import logging
 import queue
 import threading
+import time
 from typing import Any, Optional
 
 import numpy as np
@@ -19,7 +20,7 @@ from shokztype.web.web_config import get_config
 
 logger = logging.getLogger(__name__)
 
-_VERIFY_INTERVAL_FRAMES = 100  # 100 帧 × 20ms = 2 秒
+_VERIFY_INTERVAL_FRAMES = 50  # 50 帧 × 20ms = 1 秒（减小以降低过渡批次丢失）
 
 
 class SpeakerGate:
@@ -32,6 +33,7 @@ class SpeakerGate:
         self._speaker_processor = None
         self._filter_thread: Optional[threading.Thread] = None
         self._filter_running = threading.Event()
+        self.last_approval_time: float = 0.0  # 最近一次声纹验证通过的时间
 
         self._init_processor()
 
@@ -68,10 +70,11 @@ class SpeakerGate:
         self._filter_running.clear()
         if self._audio is not None:
             self._audio.stop()
-        # 等过滤线程退出并刷完剩余帧到 output_queue，再让后续 handler 跑
-        if self._filter_thread and self._filter_thread.is_alive():
-            self._filter_thread.join(timeout=3.0)
+        # join 在后台线程执行，避免阻塞 EventBus 派发
+        t = self._filter_thread
         self._filter_thread = None
+        if t is not None and t.is_alive():
+            threading.Thread(target=t.join, args=(3.0,), daemon=True).start()
 
     def _on_done(self, _: Any) -> None:
         # stop 里已经 join 过了，这里只做兜底
@@ -97,12 +100,9 @@ class SpeakerGate:
                 self._process_batch(batch)
                 batch = []
 
-        # 退出前：剩余不足 2 秒的帧直接放行
-        for frame in batch:
-            try:
-                self.output_queue.put_nowait(frame)
-            except queue.Full:
-                break
+        # 退出前：剩余帧走声纹验证后再转发
+        if batch:
+            self._process_batch(batch)
 
         logger.info("声纹过滤已停止")
 
@@ -134,11 +134,22 @@ class SpeakerGate:
         if ok:
             self._forward(frames)
         else:
-            logger.info("声纹过滤: 丢弃 %d 帧 (说话人: %s)", len(frames), speaker_id)
+            logger.info("声纹过滤: 丢弃 %d 帧 (说话人: %s)，发送静音维持流连续性", len(frames), speaker_id)
+            self._forward_silence(len(frames))
 
     def _forward(self, frames: list[np.ndarray]) -> None:
+        self.last_approval_time = time.time()
         for frame in frames:
             try:
                 self.output_queue.put_nowait(frame)
+            except queue.Full:
+                break
+
+    def _forward_silence(self, n_frames: int) -> None:
+        """发送静音帧替代丢弃帧，维持流式 ASR 的音频连续性。"""
+        silence = np.zeros(320, dtype=np.int16)  # 16kHz × 20ms
+        for _ in range(n_frames):
+            try:
+                self.output_queue.put_nowait(silence)
             except queue.Full:
                 break

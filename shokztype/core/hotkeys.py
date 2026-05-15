@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -57,17 +58,18 @@ def _runtime_log_dir(
 ) -> Path:
     """Return the writable runtime log directory.
 
-    Args:
-        app_executable: Frozen application executable path. Accepted for tests
-            and future path decisions; logs intentionally never live beside it.
-        home: User home directory override for tests.
-
-    Returns:
-        Directory path for ShokzType runtime logs.
+    - macOS: ~/Library/Logs/ShokzType  (standard macOS convention)
+    - Windows: %LOCALAPPDATA%/ShokzType/logs  (writable regardless of install location)
+    - other: ~/.shokztype/logs
     """
     _ = app_executable
     base_home = Path(home).expanduser() if home is not None else Path.home()
-    return base_home / "Library" / "Logs" / "ShokzType"
+    if sys.platform == "darwin":
+        return base_home / "Library" / "Logs" / "ShokzType"
+    if sys.platform == "win32":
+        local_appdata = os.environ.get("LOCALAPPDATA") or str(base_home / "AppData" / "Local")
+        return Path(local_appdata) / "ShokzType" / "logs"
+    return base_home / ".shokztype" / "logs"
 
 
 def _helper_command(

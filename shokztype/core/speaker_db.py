@@ -111,6 +111,8 @@ class SpeakerDB:
         best_score = -1.0
 
         for name, entry in all_entries.items():
+            if not entry.get("embeddings"):  # 跳过未完成录入的占位档案
+                continue
             centroid = np.array(entry["centroid"], dtype=np.float32)
             centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
             score = float(np.dot(query, centroid))
@@ -137,6 +139,8 @@ class SpeakerDB:
         scored: list[tuple[str, float]] = []
 
         for name, entry in all_entries.items():
+            if not entry.get("embeddings"):
+                continue
             centroid = np.array(entry["centroid"], dtype=np.float32)
             centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
             score = float(np.dot(query, centroid))

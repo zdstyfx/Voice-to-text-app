@@ -33,6 +33,42 @@ def type_text(text: str, append_newline: bool = False, method: str = "auto") -> 
     logger.error("所有文本注入方式均失败: %s", payload)
 
 
+def send_backspaces(n: int) -> None:
+    if n <= 0:
+        return
+    if IS_WINDOWS:
+        from shokztype.core.output_win import send_backspaces as _send
+        _send(n)
+    elif IS_MACOS:
+        from shokztype.core.output_mac import send_backspaces as _send
+        _send(n)
+    else:
+        logger.warning("send_backspaces: 不支持的平台")
+
+
+def send_enter() -> None:
+    if IS_WINDOWS:
+        from shokztype.core.output_win import send_enter as _send
+        _send()
+    elif IS_MACOS:
+        from shokztype.core.output_mac import send_enter as _send
+        _send()
+    else:
+        logger.warning("send_enter: 不支持的平台")
+
+
+def send_newline() -> None:
+    """Shift+Enter：在聊天输入框中换行而不提交。"""
+    if IS_WINDOWS:
+        from shokztype.core.output_win import send_shift_enter as _send
+        _send()
+    elif IS_MACOS:
+        from shokztype.core.output_mac import send_shift_enter as _send
+        _send()
+    else:
+        logger.warning("send_newline: 不支持的平台")
+
+
 def _try_unicode(payload: str) -> bool:
     if IS_WINDOWS:
         from shokztype.core.output_win import type_with_unicode

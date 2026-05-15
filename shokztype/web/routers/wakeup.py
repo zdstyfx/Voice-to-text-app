@@ -26,10 +26,12 @@ if DATA_DIR != APP_DIR and not os.path.exists(_KEYWORDS_PATH):
 
 
 def _get_tokens_path() -> str:
+    from shokztype.core.kws import _safe_ascii_path
     config = get_config()
     model_dir = config.get("kws", {}).get("model_dir", "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20")
     if not os.path.isabs(model_dir):
         model_dir = os.path.join(APP_DIR, model_dir)
+    model_dir = _safe_ascii_path(model_dir, "kws-model")
     return os.path.join(model_dir, "tokens.txt")
 
 
@@ -58,21 +60,31 @@ def _write_all_keywords(keywords: list[dict]) -> None:
     with open(_KEYWORDS_PATH, "w", encoding="utf-8") as f:
         for kw in keywords:
             f.write(f"{kw['pinyin']} @{kw['name']}\n")
+    # 同步到 kws.keywords_file（sherpa-onnx 需要 ASCII 路径时使用）
+    kws_path = get_config().get("kws", {}).get("keywords_file", "")
+    if kws_path and os.path.abspath(kws_path) != os.path.abspath(_KEYWORDS_PATH):
+        import shutil
+        os.makedirs(os.path.dirname(kws_path), exist_ok=True)
+        shutil.copy2(_KEYWORDS_PATH, kws_path)
 
 
 def _rebuild_keywords_file(start_keywords: list[dict], end_keyword_names: list[str]) -> None:
-    """用开始词列表 + 结束词名称列表重建 keywords.txt。
+    """用开始词列表 + 结束词 + 命令词重建 keywords.txt。
 
     start_keywords: [{"name": ..., "pinyin": ...}] — 已编码
     end_keyword_names: ["退出", "取消", ...] — 纯文本，需要编码
+    命令词从 config 自动读取。
     """
     from shokztype.core.kws_add_keyword import text_to_kws_line
+
+    config = get_config()
+    cmd_keyword_names = list(config.get("wakeup", {}).get("command_keywords", {}).keys())
 
     all_kws = list(start_keywords)
     existing_names = {kw["name"] for kw in all_kws}
     tokens_path = _get_tokens_path()
 
-    for name in end_keyword_names:
+    for name in end_keyword_names + cmd_keyword_names:
         if name in existing_names:
             continue
         try:
@@ -80,17 +92,20 @@ def _rebuild_keywords_file(start_keywords: list[dict], end_keyword_names: list[s
             m = re.search(r"@(.+)$", line)
             pinyin = line[:m.start()].strip() if m else line
             all_kws.append({"name": name, "pinyin": pinyin})
+            existing_names.add(name)
         except Exception as e:
-            logger.warning("结束词 '%s' token 编码失败: %s", name, e)
+            logger.warning("关键词 '%s' token 编码失败: %s", name, e)
 
     _write_all_keywords(all_kws)
 
 
 def _read_start_keywords_with_pinyin() -> list[dict]:
-    """读取开始词（排除结束词），含拼音。"""
+    """读取开始词（排除结束词和命令词），含拼音。"""
     config = get_config()
     end_names = set(config.get("wakeup", {}).get("end_keywords", []))
-    return [kw for kw in _read_all_keywords() if kw["name"] not in end_names]
+    cmd_names = set(config.get("wakeup", {}).get("command_keywords", {}).keys())
+    exclude = end_names | cmd_names
+    return [kw for kw in _read_all_keywords() if kw["name"] not in exclude]
 
 
 def _read_start_keyword_names() -> list[str]:
@@ -103,35 +118,84 @@ def _notify_pipeline():
     bus.emit("config_changed", {"wakeup": {"keywords_file": True}})
 
 
+def sync_keywords_on_startup() -> None:
+    """启动时校验 keywords.txt 与 config 是否一致，不一致则重建。"""
+    config = get_config()
+    wakeup_cfg = config.get("wakeup", {})
+    end_names_cfg = set(wakeup_cfg.get("end_keywords", _DEFAULT_END_KEYWORDS))
+    cmd_names_cfg = set(wakeup_cfg.get("command_keywords", {}).keys())
+    all_names_file = {kw["name"] for kw in _read_all_keywords()}
+    start_names_file = {kw["name"] for kw in _read_start_keywords_with_pinyin()}
+    non_start_names_file = all_names_file - start_names_file
+    expected_non_start = end_names_cfg | cmd_names_cfg
+    if expected_non_start != non_start_names_file:
+        logger.info("keywords.txt 与 config 不一致，重建: cfg=%s file=%s", expected_non_start, non_start_names_file)
+        try:
+            start_kws = _read_start_keywords_with_pinyin()
+            _rebuild_keywords_file(start_kws, list(end_names_cfg))
+        except Exception as e:
+            logger.warning("启动时重建 keywords.txt 失败: %s", e)
+
+
 # ---------------------------------------------------------------------------
 # 基本配置
 # ---------------------------------------------------------------------------
+
+_DEFAULT_END_KEYWORDS = ["退出", "结束"]
+
 
 @router.get("/api/wakeup")
 async def read_wakeup() -> dict:
     config = get_config()
     w = config.get("wakeup", {})
+    # 兼容旧格式 {"method": "hotkey"} → 新格式 {"methods": [...]}
+    methods = w.get("methods") or [w.get("method", "hotkey")]
+
+    end_keywords = w.get("end_keywords")
+    if end_keywords is None:
+        # 首次：写入默认结束词到 config 和 keywords.txt，并触发 pipeline 重载
+        end_keywords = _DEFAULT_END_KEYWORDS
+        update_config({"wakeup": {"end_keywords": end_keywords}})
+        start_kws = _read_start_keywords_with_pinyin()
+        try:
+            _rebuild_keywords_file(start_kws, end_keywords)
+            logger.info("默认结束词已初始化: %s", end_keywords)
+            _notify_pipeline()
+        except Exception as e:
+            logger.warning("初始化默认结束词失败: %s", e)
+
     return {
-        "method": w.get("method", "hotkey"),
-        "hotkey_combo": w.get("hotkey", {}).get("combo", "f2"),
+        "methods": methods,
+        "hotkey_combo": w.get("hotkey", {}).get("combo", "f9"),
         "start_keywords": _read_start_keyword_names(),
-        "end_keywords": w.get("end_keywords", ["退出", "取消", "再见"]),
+        "end_keywords": end_keywords,
+        "undo_hotkey": w.get("undo_hotkey", "ctrl+shift+z"),
+        "command_keywords": w.get("command_keywords", {"帮我撤销": "undo"}),
     }
 
 
 @router.post("/api/wakeup")
 async def save_wakeup(request: Request) -> dict:
     body = await request.json()
+    methods = body.get("methods") or [body.get("method", "hotkey")]
+
+    if "vad" in methods:
+        import importlib.util
+        if importlib.util.find_spec("sherpa_onnx") is None:
+            return {"success": False, "error": "语音唤醒需要安装 sherpa-onnx 组件，当前环境未安装。可在设置中仅使用热键唤醒。"}
+
     update_data = {
         "wakeup": {
-            "method": body.get("method", "hotkey"),
-            "hotkey": {"combo": body.get("hotkey_combo", "ctrl+shift+space")},
+            "methods": methods,
+            "hotkey": {"combo": body.get("hotkey_combo", "f9")},
         }
     }
     end_keywords_changed = False
     if "end_keywords" in body:
         update_data["wakeup"]["end_keywords"] = body["end_keywords"]
         end_keywords_changed = True
+    if "undo_hotkey" in body:
+        update_data["wakeup"]["undo_hotkey"] = body["undo_hotkey"]
 
     update_config(update_data)
 
@@ -191,7 +255,7 @@ async def add_start_keyword(request: Request) -> dict:
 
     try:
         line = text_to_kws_line(keyword, _get_tokens_path())
-    except (ValueError, FileNotFoundError) as e:
+    except Exception as e:
         return {"success": False, "error": str(e)}
 
     m = re.search(r"@(.+)$", line)
@@ -204,6 +268,97 @@ async def add_start_keyword(request: Request) -> dict:
     _rebuild_keywords_file(start_kws, end_names)
     _notify_pipeline()
     return {"success": True, "keyword": keyword}
+
+
+# ---------------------------------------------------------------------------
+# 结束关键词
+# ---------------------------------------------------------------------------
+
+@router.post("/api/wakeup/add-end-keyword")
+async def add_end_keyword(request: Request) -> dict:
+    body = await request.json()
+    keyword = body.get("keyword", "").strip()
+    if not keyword:
+        return {"success": False, "error": "结束词不能为空"}
+
+    config = get_config()
+    end_keywords = list(config.get("wakeup", {}).get("end_keywords", []))
+    if keyword in end_keywords:
+        return {"success": False, "error": "该结束词已存在"}
+
+    end_keywords.append(keyword)
+    update_config({"wakeup": {"end_keywords": end_keywords}})
+    start_kws = _read_start_keywords_with_pinyin()
+    _rebuild_keywords_file(start_kws, end_keywords)
+    _notify_pipeline()
+    return {"success": True, "keyword": keyword}
+
+
+@router.delete("/api/wakeup/end-keywords/{name}")
+async def delete_end_keyword(name: str) -> dict:
+    config = get_config()
+    end_keywords = [k for k in config.get("wakeup", {}).get("end_keywords", []) if k != name]
+    update_config({"wakeup": {"end_keywords": end_keywords}})
+    start_kws = _read_start_keywords_with_pinyin()
+    _rebuild_keywords_file(start_kws, end_keywords)
+    _notify_pipeline()
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# 命令关键词（语音触发撤销等操作）
+# ---------------------------------------------------------------------------
+
+@router.post("/api/wakeup/add-command-keyword")
+async def add_command_keyword(request: Request) -> dict:
+    body = await request.json()
+    keyword = body.get("keyword", "").strip()
+    action = body.get("action", "undo")
+    if not keyword:
+        return {"success": False, "error": "命令词不能为空"}
+
+    config = get_config()
+    cmd_kws = dict(config.get("wakeup", {}).get("command_keywords", {}))
+    if keyword in cmd_kws and cmd_kws[keyword] == action:
+        return {"success": False, "error": "该命令词已存在"}
+
+    cmd_kws[keyword] = action
+    update_config({"wakeup": {"command_keywords": cmd_kws}})
+    start_kws = _read_start_keywords_with_pinyin()
+    end_names = config.get("wakeup", {}).get("end_keywords", [])
+    _rebuild_keywords_file(start_kws, end_names)
+    _notify_pipeline()
+    return {"success": True, "keyword": keyword, "action": action}
+
+
+@router.delete("/api/wakeup/command-keywords/{name}")
+async def delete_command_keyword(name: str) -> dict:
+    config = get_config()
+    cmd_kws = {k: v for k, v in config.get("wakeup", {}).get("command_keywords", {}).items() if k != name}
+    update_config({"wakeup": {"command_keywords": cmd_kws}})
+    start_kws = _read_start_keywords_with_pinyin()
+    end_names = config.get("wakeup", {}).get("end_keywords", [])
+    _rebuild_keywords_file(start_kws, end_names)
+    _notify_pipeline()
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# 撤销快捷键
+# ---------------------------------------------------------------------------
+
+@router.post("/api/wakeup/undo-hotkey")
+async def save_undo_hotkey(request: Request) -> dict:
+    body = await request.json()
+    combo = body.get("combo", "").strip()
+    if not combo:
+        return {"success": False, "error": "快捷键不能为空"}
+
+    update_config({"wakeup": {"undo_hotkey": combo}})
+
+    from shokztype.web.services import recording_pipeline
+    recording_pipeline.restart_undo_hotkey(combo)
+    return {"success": True, "combo": combo}
 
 
 # ---------------------------------------------------------------------------

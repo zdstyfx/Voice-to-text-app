@@ -13,9 +13,9 @@ from shokztype.core.config import DEFAULT_CONFIG as APP_DEFAULT_CONFIG, _merge_d
 WEB_EXTRA_DEFAULTS: dict[str, Any] = {
     "currentMode": "translate",
     "llm": {
-        "apiBaseUrl": "",
-        "apiKey": "",
-        "model": "",
+        "apiBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "apiKey": "ark-392726cc-6f78-4686-b4fe-29609010c653-3ae33",
+        "model": "ep-20260511181651-4vdjb",
         "timeoutSeconds": 90,
         "temperature": 0.2,
     },
@@ -37,10 +37,20 @@ WEB_EXTRA_DEFAULTS: dict[str, Any] = {
         "activeProfiles": [],
     },
     "wakeup": {
-        "method": "hotkey",
-        "hotkey": {"combo": "ctrl+shift+space"},
+        "methods": ["hotkey"],
+        "hotkey": {"combo": "f9"},
         "vad": {"keyword": ""},
+        "undo_hotkey": "ctrl+shift+z",
+        "command_keywords": {
+            "帮我撤销": "undo",
+            "换行": "newline",
+            "按回车": "enter",
+            "启动翻译": "switch_mode:translate",
+            "启动润色": "switch_mode:polish",
+            "启动转写": "switch_mode:transcribe",
+        },
     },
+    "custom_modes": [],
 }
 
 DEFAULT_CONFIG = _merge_dict(APP_DEFAULT_CONFIG, WEB_EXTRA_DEFAULTS)

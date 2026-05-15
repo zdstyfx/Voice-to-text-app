@@ -33,6 +33,23 @@ def type_with_cgevent(payload: str) -> bool:
         return False
 
 
+def send_backspaces(n: int) -> bool:
+    if n <= 0:
+        return True
+    try:
+        import Quartz
+        VK_DELETE = 0x33  # kVK_Delete
+        for _ in range(n):
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap,
+                               Quartz.CGEventCreateKeyboardEvent(None, VK_DELETE, True))
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap,
+                               Quartz.CGEventCreateKeyboardEvent(None, VK_DELETE, False))
+        return True
+    except Exception as exc:
+        logger.warning("send_backspaces CGEvent 失败: %s", exc)
+        return False
+
+
 def try_clipboard_injection(payload: str) -> bool:
     try:
         import pyperclip

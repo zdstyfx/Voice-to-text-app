@@ -14,16 +14,22 @@ import threading
 
 UDP_PORT = 0
 
+MODE_LABELS: dict[str, str] = {
+    "translate": "翻译",
+    "polish":    "润色",
+    "transcribe": "转写",
+}
+
 STYLES = {
-    "loading":    {"bg": "#27272a", "fg": "#71717a", "text": "● 加载中..."},
-    "ready":      {"bg": "#0c4a6e", "fg": "#7dd3fc", "text": "● 就绪"},
-    "idle":       {"bg": "#1e293b", "fg": "#64748b", "text": "● 等待唤醒词"},
-    "recording":  {"bg": "#064e3b", "fg": "#6ee7b7", "text": "● 录音中"},
-    "active":     {"bg": "#064e3b", "fg": "#6ee7b7", "text": "● 录音中"},
-    "processing": {"bg": "#312e81", "fg": "#a5b4fc", "text": "● 处理中..."},
-    "saving":     {"bg": "#27272a", "fg": "#a1a1aa", "text": "● 保存中..."},
-    "switching":  {"bg": "#27272a", "fg": "#a1a1aa", "text": "● 切换中..."},
-    "error":      {"bg": "#78350f", "fg": "#fcd34d", "text": "● 错误"},
+    "loading":    {"bg": "#1E1E1B", "fg": "#6B6B65", "text": "● 加载中..."},
+    "ready":      {"bg": "#161613", "fg": "#8A8A82", "text": "● 就绪"},
+    "idle":       {"bg": "#161613", "fg": "#6B6B65", "text": "● 等待唤醒词"},
+    "recording":  {"bg": "#2A1200", "fg": "#FF5C00", "text": "● 录音中"},
+    "active":     {"bg": "#2A1200", "fg": "#FF5C00", "text": "● 录音中"},
+    "processing": {"bg": "#1E1E1B", "fg": "#F5F4F0", "text": "● 处理中..."},
+    "saving":     {"bg": "#1E1E1B", "fg": "#6B6B65", "text": "● 保存中..."},
+    "switching":  {"bg": "#1E1E1B", "fg": "#6B6B65", "text": "● 切换中..."},
+    "error":      {"bg": "#2A0A0A", "fg": "#F04040", "text": "● 错误"},
 }
 
 MAX_WIDTH_RATIO = 0.5
@@ -142,9 +148,12 @@ class OverlayWindowMac:
 
         status = msg.get("status", "loading")
         text = msg.get("text")
+        mode = msg.get("mode")
         style = STYLES.get(status, STYLES["loading"])
 
-        display = text or style["text"]
+        status_text = text or style["text"]
+        mode_label = (MODE_LABELS.get(mode) or msg.get("mode_name")) if mode else None
+        display = f"{mode_label} · {status_text}" if mode_label and status != "loading" else status_text
         r, g, b = _hex_to_rgb(style["bg"])
         fr, fg_val, fb = _hex_to_rgb(style["fg"])
 
@@ -285,9 +294,15 @@ class OverlayWindowTk:
     def _apply(self, msg: dict):
         status = msg.get("status", "loading")
         text = msg.get("text")
+        mode = msg.get("mode")
         style = STYLES.get(status, STYLES["loading"])
 
-        display = text or style["text"]
+        status_text = text or style["text"]
+        mode_label = (MODE_LABELS.get(mode) or msg.get("mode_name")) if mode else None
+        if mode_label and status != "loading":
+            display = f"{mode_label} · {status_text.removeprefix('● ')}"
+        else:
+            display = status_text
         bg = style["bg"]
         fg = style["fg"]
 

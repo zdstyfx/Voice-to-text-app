@@ -18,6 +18,10 @@ _kws_input.txt
 packaging/build/
 packaging/dist/
 
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+
 # IDE / tools
 .vscode/
 .superpowers/

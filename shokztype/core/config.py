@@ -37,7 +37,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "merge_gap_ms": 800,
     },
     "asr": {
-        "backend": "local",  # "local" | "cloud"
+        "backend": "volcengine",  # "local" | "volcengine" | "cloud"
         "use_vad": False,
         "use_punc": True,
         "language": "zh",
@@ -45,14 +45,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "batch_size_s": 60.0,
     },
     "cloud_asr": {
-        "provider": "dashscope",  # "dashscope" | "volcengine"
+        "provider": "volcengine",  # "dashscope" | "volcengine"
         "api_key": "",
         "model": "paraformer-realtime-v2",
         "format": "pcm",
         "sample_rate": 16000,
         "disfluency_removal": False,
         "volcengine": {
-            "api_key": "",
+            "api_key": "4489341b-60b5-4025-978b-9f7bb2769ce4",
             "model_id": "",
             "ws_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
             "resource_id": "volc.bigasr.sauc.duration",

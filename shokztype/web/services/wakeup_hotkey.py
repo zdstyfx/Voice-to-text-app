@@ -19,6 +19,7 @@ class HotkeyWakeup:
         self._running = threading.Event()
 
         bus.on("done", self._on_done)
+        bus.on("start", self._on_start_event)  # 同步 VadKwsWakeup 的启动状态
 
     def start(self) -> None:
         self._running.set()
@@ -31,6 +32,7 @@ class HotkeyWakeup:
     def stop(self) -> None:
         self._running.clear()
         self._bus.off("done", self._on_done)
+        self._bus.off("start", self._on_start_event)
         pkl = PersistentKeyListener.get()
         pkl.clear_hotkey()
         pkl._stop_helper()
@@ -52,5 +54,11 @@ class HotkeyWakeup:
             logger.info("热键: 开始录音")
             self._bus.emit("start")
 
+    def _on_start_event(self, _) -> None:
+        """任何模块（包括 VadKwsWakeup）发出 start 时同步本模块状态。"""
+        self._active = True
+        self._locked = False
+
     def _on_done(self, _) -> None:
+        self._active = False
         self._locked = False

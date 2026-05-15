@@ -32,12 +32,26 @@ else:
 # sherpa-onnx 原生库
 sherpa_dir = site_pkg / "sherpa_onnx"
 
+# fireredvad 预训练模型目录（安装在 site-packages/pretrained_models/ 下）
+fireredvad_pretrained = site_pkg / "pretrained_models"
+
 # ---------------------------------------------------------------------------
 # 平台相关的 binaries 和 hidden imports
 # ---------------------------------------------------------------------------
 
 platform_binaries = []
 platform_hiddenimports = []
+
+# sherpa-onnx 通过 ctypes 加载原生库，PyInstaller 静态分析无法检测，需手动收集
+# 隐患：sherpa_dir 原来只被声明但从未加入 binaries，打包后 sherpa_onnx 会因
+# 找不到 .dll/.dylib 而在运行时 ImportError
+if sherpa_dir.exists():
+    if IS_WINDOWS:
+        for _p in sherpa_dir.glob("*.dll"):
+            platform_binaries.append((str(_p), "sherpa_onnx"))
+    elif IS_MACOS:
+        for _p in list(sherpa_dir.glob("*.dylib")) + list(sherpa_dir.glob("*.so")):
+            platform_binaries.append((str(_p), "sherpa_onnx"))
 
 if IS_WINDOWS:
     portaudio_dir = site_pkg / "_sounddevice_data" / "portaudio-binaries"
@@ -50,6 +64,16 @@ if IS_WINDOWS:
         "pystray",
         "pystray._win32",
         "PIL",
+        # 隐患修复：Windows 下 pywebview 使用 Edge WebView2 后端，
+        # 动态选择 backend，PyInstaller 检测不到字符串拼接的 import
+        "webview",
+        "webview.platforms",
+        "webview.platforms.edgechromium",
+        "webview.platforms.winforms",
+        # 隐患修复：pynput Windows 后端同样是动态 import，需手动声明
+        "pynput._util.win32",
+        "pynput.keyboard._win32",
+        "pynput.mouse._win32",
         # 平台模块
         "shokztype.core.output_win",
         "shokztype.web.services.device_monitor_win",
@@ -89,6 +113,12 @@ elif IS_MACOS:
 # Analysis
 # ---------------------------------------------------------------------------
 
+# fireredvad 预训练模型（路径逻辑：frozen 后 pkg_root 指向 _internal/，
+# 所以模型需要打包到 _internal/pretrained_models/ 下）
+extra_datas = []
+if fireredvad_pretrained.exists():
+    extra_datas.append((str(fireredvad_pretrained), "pretrained_models"))
+
 a = Analysis(
     [str(ROOT / "shokztype" / "__main__.py")],
     pathex=[str(ROOT)],
@@ -109,7 +139,7 @@ a = Analysis(
         (str(site_pkg / "librosa" / "core" / "__init__.pyi"), "librosa/core"),
         (str(site_pkg / "librosa" / "feature" / "__init__.pyi"), "librosa/feature"),
         (str(site_pkg / "librosa" / "util" / "__init__.pyi"), "librosa/util"),
-    ],
+    ] + extra_datas,
     hiddenimports=[
         # sounddevice + PortAudio
         "sounddevice",
@@ -128,8 +158,18 @@ a = Analysis(
         # ASR
         "funasr_onnx",
         "sherpa_onnx",
-        # modelscope 声纹模型
+        # 隐患修复：fireredvad (VAD) 完全缺失于 spec，动态 import 无法被检测
+        "fireredvad",
+        "fireredvad.core",
+        # 隐患修复：onnxruntime 原生库（funasr_onnx/fireredvad 共用）
+        "onnxruntime",
+        "onnxruntime.capi",
+        "onnxruntime.capi.onnxruntime_inference_collection",
+        # modelscope 声纹模型（动态 import 较多，尽量穷举已知子模块）
         "modelscope.models.audio.sv.DTDNN",
+        "modelscope.models.audio.sv",
+        "modelscope.pipelines",
+        "modelscope.utils.hub",
         # 热键
         "pynput",
         "pynput.keyboard",
@@ -146,18 +186,43 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "matplotlib",
-        "tkinter",
-        "tkinter.test",
         "test",
     ],
     noarchive=False,
 )
 
 # ---------------------------------------------------------------------------
-# PYZ + EXE
+# PYZ + Splash（仅 Windows；macOS 不支持 PyInstaller splash screen）
 # ---------------------------------------------------------------------------
 
 pyz = PYZ(a.pure)
+
+# Windows splash screen：exe 双击后立刻显示，Python 还没开始初始化时就可见。
+# 代码里调用 pyi_splash.close() 来关闭（见 shokztype/__main__.py）。
+# 依赖 PyInstaller 5.7+；如果版本太旧会在此处报 NameError，升级即可。
+_splash_extras = []  # 供 EXE / COLLECT 引用
+if IS_WINDOWS:
+    _splash_img = Path(SPECPATH) / "splash.png"
+    if _splash_img.exists():
+        splash = Splash(
+            str(_splash_img),
+            binaries=a.binaries,
+            datas=a.datas,
+            text_pos=None,       # 不显示"正在加载 xxx.py"的进度文字，保持画面简洁
+            minify_script=True,
+            always_on_top=True,
+        )
+        _splash_extras = [splash, splash.binaries]
+    else:
+        import warnings
+        warnings.warn(
+            "splash.png 不存在，跳过 splash screen。"
+            "运行 python packaging/create_splash.py 生成。"
+        )
+
+# ---------------------------------------------------------------------------
+# EXE
+# ---------------------------------------------------------------------------
 
 exe_kwargs = dict(
     name="ShokzType",
@@ -176,6 +241,7 @@ elif IS_MACOS:
 exe = EXE(
     pyz,
     a.scripts,
+    *_splash_extras,   # splash + splash.binaries（Windows 有；macOS 空列表）
     [],
     exclude_binaries=True,
     **exe_kwargs,
@@ -185,10 +251,15 @@ exe = EXE(
 # COLLECT（文件夹分发模式）
 # ---------------------------------------------------------------------------
 
+_collect_extras = []
+if IS_WINDOWS and _splash_extras:
+    _collect_extras = [_splash_extras[1]]  # splash.binaries
+
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
+    *_collect_extras,
     strip=False,
     upx=False,
     name="ShokzType",

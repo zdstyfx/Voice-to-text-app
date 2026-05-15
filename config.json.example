@@ -6,7 +6,8 @@
     "method": "hotkey",
     "hotkey": {
       "combo": "f2"
-    }
+    },
+    "end_keywords": ["退出", "结束"]
   },
   "cloud_asr": {
     "api_key": ""

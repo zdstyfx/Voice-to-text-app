@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes as wintypes
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,9 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 VK_CONTROL = 0x11
 VK_V = 0x56
+VK_BACK = 0x08
+VK_RETURN = 0x0D
+VK_SHIFT = 0x10
 
 
 if hasattr(wintypes, "ULONG_PTR"):
@@ -62,6 +66,68 @@ class InputUnion(ctypes.Union):
 
 class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("union", InputUnion)]
+
+
+def send_enter() -> bool:
+    extra = GetMessageExtraInfo()
+    inputs = (INPUT * 2)(
+        INPUT(type=INPUT_KEYBOARD, union=InputUnion(ki=KeyboardInput(
+            wVk=VK_RETURN, wScan=0, dwFlags=0, time=0, dwExtraInfo=extra,
+        ))),
+        INPUT(type=INPUT_KEYBOARD, union=InputUnion(ki=KeyboardInput(
+            wVk=VK_RETURN, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=extra,
+        ))),
+    )
+    sent = SendInput(2, ctypes.byref(inputs[0]), ctypes.sizeof(INPUT))
+    return sent == 2
+
+
+def send_shift_enter() -> bool:
+    """Shift+Enter：在聊天输入框中换行而不提交。"""
+    extra = GetMessageExtraInfo()
+    inputs = (INPUT * 4)(
+        INPUT(type=INPUT_KEYBOARD, union=InputUnion(ki=KeyboardInput(
+            wVk=VK_SHIFT, wScan=0, dwFlags=0, time=0, dwExtraInfo=extra,
+        ))),
+        INPUT(type=INPUT_KEYBOARD, union=InputUnion(ki=KeyboardInput(
+            wVk=VK_RETURN, wScan=0, dwFlags=0, time=0, dwExtraInfo=extra,
+        ))),
+        INPUT(type=INPUT_KEYBOARD, union=InputUnion(ki=KeyboardInput(
+            wVk=VK_RETURN, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=extra,
+        ))),
+        INPUT(type=INPUT_KEYBOARD, union=InputUnion(ki=KeyboardInput(
+            wVk=VK_SHIFT, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=extra,
+        ))),
+    )
+    sent = SendInput(4, ctypes.byref(inputs[0]), ctypes.sizeof(INPUT))
+    return sent == 4
+
+
+def send_backspaces(n: int) -> bool:
+    if n <= 0:
+        return True
+    n_events = n * 2
+    input_array_type = INPUT * n_events
+    inputs = input_array_type()
+    extra = GetMessageExtraInfo()
+    for i in range(n):
+        inputs[i * 2] = INPUT(
+            type=INPUT_KEYBOARD,
+            union=InputUnion(ki=KeyboardInput(
+                wVk=VK_BACK, wScan=0, dwFlags=0, time=0, dwExtraInfo=extra,
+            )),
+        )
+        inputs[i * 2 + 1] = INPUT(
+            type=INPUT_KEYBOARD,
+            union=InputUnion(ki=KeyboardInput(
+                wVk=VK_BACK, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=extra,
+            )),
+        )
+    sent = SendInput(n_events, ctypes.byref(inputs[0]), ctypes.sizeof(INPUT))
+    if sent != n_events:
+        logger.warning("SendInput Backspace 失败，期望 %d 事件，实际 %d", n_events, sent)
+        return False
+    return True
 
 
 def type_with_unicode(payload: str) -> bool:
@@ -111,6 +177,7 @@ def try_clipboard_injection(payload: str) -> bool:
     try:
         pyperclip.copy(payload)
         success = _emit_ctrl_v()
+        time.sleep(0.1)  # wait for target app to process Ctrl+V before restoring clipboard
     except Exception as exc:
         logger.debug("剪贴板注入失败: %s", exc)
         success = False

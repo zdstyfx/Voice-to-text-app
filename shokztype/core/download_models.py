@@ -5,6 +5,7 @@ FunASR模型下载脚本
 并行下载所有模型文件
 """
 import logging
+import os
 import sys
 import json
 import threading
@@ -41,8 +42,8 @@ def download_model(model_config, progress_callback=None):
 def main():
     """主函数：并行下载所有模型"""
     # 配置日志系统（使用统一配置）
-    from shokztype import APP_DIR
-    log_dir = os.path.join(APP_DIR, "logs")
+    from shokztype import DATA_DIR
+    log_dir = os.path.join(DATA_DIR, "logs")
     setup_logging("INFO", log_dir)
     
     # 从统一配置获取模型列表

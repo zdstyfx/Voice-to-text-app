@@ -1,13 +1,41 @@
 @echo off
-REM Shokz Type 打包脚本
+REM Shokz Type 打包脚本（轻量化版本，不含本地 ASR 模型）
+REM 依赖：Python, Node.js, PyInstaller, Inno Setup 6.x (可选，用于生成安装包)
+REM       Inno Setup 下载: https://jrsoftware.org/isdl.php
 
 cd /d "%~dp0"
 
 echo === Shokz Type 打包 ===
 echo.
 
-REM 1. PyInstaller
-echo [1/5] 正在打包...
+REM 0. 构建前端
+echo [0/5] 构建前端...
+cd ..\frontend
+call npm install
+if errorlevel 1 (
+    echo 前端依赖安装失败！
+    pause
+    exit /b 1
+)
+call npm run build
+if errorlevel 1 (
+    echo 前端构建失败！
+    pause
+    exit /b 1
+)
+cd ..\packaging
+
+REM 1a. 生成 splash screen 图片
+echo.
+echo [1a/5] 生成 splash screen...
+python create_splash.py
+if errorlevel 1 (
+    echo   splash.png 生成失败，将跳过 splash screen（不影响打包）
+)
+
+REM 1b. PyInstaller
+echo.
+echo [1b/5] 正在打包...
 pyinstaller --clean --noconfirm shokztype.spec
 if errorlevel 1 (
     echo 打包失败！
@@ -33,27 +61,10 @@ if exist "%LIBROSA_DIR%\__init__.pyi" (
     echo   OK
 )
 
-REM 3. 复制 ASR + 声纹模型
+REM 3. 本地 ASR 模型（轻量化：跳过，用户可在应用内按需下载）
 echo.
-echo [3/5] 复制模型文件...
-set MODEL_CACHE=%USERPROFILE%\.cache\modelscope\hub\models\iic
-set MODEL_DIST=%DIST%\models
-
-if not exist "%MODEL_DIST%" mkdir "%MODEL_DIST%"
-
-for %%m in (
-    speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx
-    punc_ct-transformer_zh-cn-common-vocab272727-onnx
-    speech_campplus_sv_zh-cn_16k-common
-    speech_fsmn_vad_zh-cn-16k-common-onnx
-) do (
-    if exist "%MODEL_CACHE%\%%m" (
-        xcopy /E /I /Y "%MODEL_CACHE%\%%m" "%MODEL_DIST%\%%m" >nul
-        echo   %%m OK
-    ) else (
-        echo   %%m 未找到，跳过
-    )
-)
+echo [3/5] 跳过本地 ASR 模型（轻量化打包）
+echo   默认使用云端 ASR，如需本地模型请在应用内下载
 
 REM 4. 复制外部文件
 echo.
@@ -66,17 +77,52 @@ if exist "..\sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20" (
 
 copy /Y "..\keywords.txt" "%DIST%\" >nul 2>nul && echo   keywords.txt OK
 
-if exist "..\config.json" (
-    copy /Y "..\config.json" "%DIST%\config.json" >nul
-    echo   config.json OK
-) else (
-    copy /Y "..\config.json.example" "%DIST%\config.json" >nul
-    echo   config.json (template) OK
+copy /Y "..\config.json.example" "%DIST%\config.json" >nul
+echo   config.json (from template) OK
+
+REM 5. 复制快捷方式脚本（保留作备用）
+echo.
+echo [5/5] 复制附加文件...
+copy /Y "create_shortcut.bat" "%DIST%\" >nul && echo   create_shortcut.bat OK
+echo 输出: %CD%\%DIST%
+
+REM 6. 健康检查
+echo.
+echo [验证] 运行打包产物健康检查...
+python verify_build.py
+if errorlevel 1 (
+    echo.
+    echo   警告：健康检查发现问题，建议修复后再制作安装包
+    echo   是否仍然继续制作安装包？(按 Ctrl+C 取消，Enter 继续)
+    pause >nul
 )
 
-REM 5. 完成
+REM 7. 制作 Inno Setup 安装包
 echo.
-echo [5/5] 打包完成！
-echo 输出: %CD%\%DIST%
+echo [安装包] 检查 Inno Setup...
+where iscc >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    echo   找到 iscc，正在编译安装包...
+    iscc shokztype.iss
+    if errorlevel 1 (
+        echo   安装包编译失败！请检查 shokztype.iss 配置
+    ) else (
+        echo.
+        echo ┌─────────────────────────────────────────────────────┐
+        echo │  安装包已生成:                                      │
+        echo │  dist\ShokzType_Setup_v0.1.0.exe                   │
+        echo │                                                     │
+        echo │  用户体验: 双击 .exe → 向导 → 桌面快捷方式自动创建  │
+        echo └─────────────────────────────────────────────────────┘
+    )
+) else (
+    echo.
+    echo   未找到 iscc（Inno Setup 编译器）
+    echo   如需生成 .exe 安装包，请先安装 Inno Setup 6.x:
+    echo     https://jrsoftware.org/isdl.php
+    echo.
+    echo   当前只生成了文件夹: %DIST%\
+    echo   分发方法（备用）：将文件夹打包发给用户，用户运行 create_shortcut.bat
+)
 echo.
 pause

@@ -62,6 +62,7 @@ def list_profiles() -> list[dict[str, Any]]:
 
 def create_profile(name: str) -> dict[str, Any]:
     """创建新的声纹档案（仅注册名称，等待采集）。"""
+    from datetime import datetime
     if _speaker_db is None:
         raise ValueError("声纹模块未初始化")
     existing = _speaker_db.list_manual_speakers()
@@ -69,10 +70,18 @@ def create_profile(name: str) -> dict[str, Any]:
         raise ValueError("最多支持 3 个声纹档案")
     if name in existing:
         raise ValueError(f"名称 '{name}' 已存在")
+    now = datetime.now().isoformat()
+    _speaker_db._speakers[name] = {
+        "embeddings": [],
+        "centroid": [],
+        "registered_at": now,
+        "sample_count": 0,
+    }
+    _speaker_db.save()
     return {
         "id": name,
         "name": name,
-        "created_at": "",
+        "created_at": now,
         "enrollment_steps": 0,
         "enrollment_complete": False,
     }

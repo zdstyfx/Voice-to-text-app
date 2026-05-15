@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import threading
+from collections import deque
 
 import sounddevice as sd
 
@@ -29,18 +30,44 @@ logger = logging.getLogger(__name__)
 # 管线实例（全局）
 # ---------------------------------------------------------------------------
 
-_wakeup = None   # HotkeyWakeup | VadKwsWakeup
+_wakeups: list = []  # [HotkeyWakeup] | [VadKwsWakeup] | [VadKwsWakeup, HotkeyWakeup]
 _transcriber = None  # StreamTranscriber | BatchTranscriber
 _audio: AudioCapture | None = None
 
 _loop: asyncio.AbstractEventLoop | None = None
 _recording = False
+_enrollment_active = False
+_restart_lock = threading.Lock()
 _ready = False
 _init_error: str | None = None
 _wakeup_method: str = "hotkey"
 _active_device_id: str | None = None
 _preferred_endpoint_id: str | None = None
 _device_switch_lock = threading.Lock()
+
+_output_history: deque = deque(maxlen=5)
+_undo_hotkey_listener = None
+_current_mode: str = "translate"
+_current_mode_name: str = "翻译"
+
+_BUILTIN_MODE_NAMES: dict[str, str] = {
+    "translate": "翻译",
+    "polish":    "润色",
+    "transcribe": "转写",
+}
+
+
+def _resolve_mode_name(mode_id: str) -> str:
+    if mode_id in _BUILTIN_MODE_NAMES:
+        return _BUILTIN_MODE_NAMES[mode_id]
+    try:
+        config = get_config()
+        for m in config.get("custom_modes", []):
+            if m["id"] == mode_id:
+                return m["name"]
+    except Exception:
+        pass
+    return mode_id
 
 # ---------------------------------------------------------------------------
 # 系统浮窗（独立进程，UDP 通信）
@@ -58,9 +85,28 @@ def _allocate_udp_port() -> int:
         return s.getsockname()[1]
 
 
+def _kill_orphan_overlays():
+    """Kill any leftover overlay subprocesses from previous runs."""
+    try:
+        import psutil
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmdline = proc.info["cmdline"] or []
+                if (proc.info["pid"] != current_pid
+                        and ("--overlay" in cmdline or "overlay_process.py" in " ".join(cmdline))):
+                    proc.kill()
+                    logger.info("已清理孤儿浮窗进程 (PID=%d)", proc.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception as e:
+        logger.debug("清理孤儿浮窗失败: %s", e)
+
+
 def _start_overlay():
     global _overlay_proc, _overlay_sock, _overlay_port
     try:
+        _kill_orphan_overlays()
         _overlay_port = _allocate_udp_port()
         if getattr(sys, 'frozen', False):
             cmd = [sys.executable, "--overlay", "--port", str(_overlay_port)]
@@ -98,10 +144,21 @@ def _push_overlay(status: str, text: str | None = None):
     if _overlay_sock is None or _overlay_port == 0:
         return
     try:
-        msg = json.dumps({"status": status, "text": text}, ensure_ascii=False)
+        msg = json.dumps({
+            "status": status, "text": text,
+            "mode": _current_mode, "mode_name": _current_mode_name,
+        }, ensure_ascii=False)
         _overlay_sock.sendto(msg.encode("utf-8"), ("127.0.0.1", _overlay_port))
     except Exception:
         pass
+
+
+def set_current_mode(mode: str) -> None:
+    """模式切换时调用，立即更新浮窗显示。"""
+    global _current_mode, _current_mode_name
+    _current_mode = mode
+    _current_mode_name = _resolve_mode_name(mode)
+    _push_overlay(_ui_state["status"], _ui_state.get("text"))
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +190,19 @@ def _set_state(status: str, text: str | None = None):
     _ui_state["text"] = text
     _push_overlay(status, text)
     msg = json.dumps({"event": "state", "status": status, "text": text}, ensure_ascii=False)
+    _push_to_clients(msg)
+
+
+def _push_to_clients(msg: str) -> None:
+    """线程安全地向所有 SSE 客户端推送消息。"""
     for queue in list(_state_clients):
-        try:
-            queue.put_nowait(msg)
-        except asyncio.QueueFull:
-            pass
+        if _loop is not None and _loop.is_running():
+            _loop.call_soon_threadsafe(queue.put_nowait, msg)
+        else:
+            try:
+                queue.put_nowait(msg)
+            except asyncio.QueueFull:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -191,19 +256,14 @@ def _on_bus_result(text):
     mode = config.get("currentMode", "transcribe")
 
     if mode == "transcribe":
-        _do_output(text, config)
+        # 后台输出，不阻塞 EventBus，让 done 事件能立即触发 UI 回到 idle
+        threading.Thread(target=_do_output, args=(text, config), daemon=True, name="Output").start()
         return
 
     # 翻译/润色模式
     _set_state("processing")
     if _loop is not None and _loop.is_running():
-        future = asyncio.run_coroutine_threadsafe(_process_and_output(text, config, mode), _loop)
-        try:
-            future.result(timeout=120)
-        except Exception as e:
-            logger.error("LLM 处理失败，降级为直接输出: %s", e)
-            _set_state("error", "LLM 处理失败")
-            _do_output(text, config)
+        asyncio.run_coroutine_threadsafe(_process_and_output(text, config, mode), _loop)
     else:
         _do_output(text, config)
 
@@ -226,7 +286,20 @@ def _on_bus_done(_):
 def _on_bus_start(_):
     """bus.emit('start') → 标记录音中。"""
     global _recording
+    if _enrollment_active:
+        return
     _recording = True
+
+
+def set_enrollment_active(active: bool) -> None:
+    global _enrollment_active
+    _enrollment_active = active
+    # 通知 VadKwsWakeup 暂停 KWS 检测，防止录入语音触发唤醒流程
+    bus.emit("enrollment_start" if active else "enrollment_stop")
+
+
+def get_default_state() -> str:
+    return "idle" if _wakeup_method == "vad" else "ready"
 
 
 async def _process_and_output(text: str, config: dict, mode: str) -> None:
@@ -234,26 +307,69 @@ async def _process_and_output(text: str, config: dict, mode: str) -> None:
     output_text = result.get("processed_text", text)
     if result.get("fell_back_to_transcribe"):
         logger.warning("LLM 降级: %s", result.get("error", ""))
-    _do_output(output_text, config)
+    _do_output(output_text, config, original_text=text)
 
 
-def _do_output(text: str, config: dict) -> None:
+def _do_output(text: str, config: dict, original_text: str | None = None) -> None:
     output_cfg = config.get("output", {})
     append_newline = output_cfg.get("append_newline", False)
-    # 先通知前端最终结果（用于历史记录），再注入文字
-    _broadcast_result(text)
+    _broadcast_result(text, original_text=original_text)
     type_text(text, append_newline=append_newline, method="type")
+    _output_history.append(len(text) + (2 if append_newline else 0))  # \r\n = 2 chars
     logger.info("已输出: %s", text[:50])
 
 
-def _broadcast_result(text: str) -> None:
+def undo_last_output() -> dict:
+    if not _output_history:
+        return {"success": False, "message": "无可撤销内容"}
+    n = _output_history.pop()
+    from shokztype.core.output import send_backspaces
+    send_backspaces(n)
+    logger.info("已撤销 %d 个字符", n)
+    return {"success": True, "chars": n}
+
+
+def _on_bus_command(data) -> None:
+    if not isinstance(data, dict):
+        return
+    action = data.get("action")
+    if action == "undo":
+        undo_last_output()
+    elif action == "enter":
+        from shokztype.core.output import send_enter
+        send_enter()
+        _output_history.append(1)
+        logger.info("已发送 Enter 键")
+    elif action == "newline":
+        from shokztype.core.output import send_newline
+        send_newline()
+        _output_history.append(1)
+        logger.info("已发送换行 (Shift+Enter)")
+    elif isinstance(action, str) and action.startswith("switch_mode:"):
+        mode_id = action.split(":", 1)[1]
+        _switch_mode_by_voice(mode_id)
+
+
+def _switch_mode_by_voice(mode_id: str) -> None:
+    config = get_config()
+    valid_ids = {"translate", "polish", "transcribe"} | {m["id"] for m in config.get("custom_modes", [])}
+    if mode_id not in valid_ids:
+        logger.warning("语音切换模式失败：无效模式 %s", mode_id)
+        return
+    update_config({"currentMode": mode_id})
+    set_current_mode(mode_id)
+    logger.info("语音切换模式: %s", mode_id)
+    msg = json.dumps({"event": "mode_changed", "mode": mode_id}, ensure_ascii=False)
+    _push_to_clients(msg)
+
+
+def _broadcast_result(text: str, original_text: str | None = None) -> None:
     """向前端广播最终输出文字（event: result），供历史面板记录。"""
-    msg = json.dumps({"event": "result", "text": text}, ensure_ascii=False)
-    for queue in list(_state_clients):
-        try:
-            queue.put_nowait(msg)
-        except asyncio.QueueFull:
-            pass
+    payload: dict = {"event": "result", "text": text}
+    if original_text is not None and original_text != text:
+        payload["original_text"] = original_text
+    msg = json.dumps(payload, ensure_ascii=False)
+    _push_to_clients(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -378,14 +494,17 @@ _speaker_gate = None
 
 def _assemble(config: dict) -> None:
     """根据配置组装唤醒模块 + 声纹门卫 + 转录模块。"""
-    global _wakeup, _transcriber, _audio, _speaker_gate, _wakeup_method, _recording
+    global _wakeups, _transcriber, _audio, _speaker_gate, _wakeup_method, _recording
 
     _recording = False
-    wakeup_method = config.get("wakeup", {}).get("method", "hotkey")
+    wakeup_cfg = config.get("wakeup", {})
+    # 兼容旧格式 {"method": "hotkey"} 和新格式 {"methods": ["hotkey", "vad"]}
+    methods: list[str] = wakeup_cfg.get("methods") or [wakeup_cfg.get("method", "hotkey")]
     asr_backend = config.get("asr", {}).get("backend", "local")
     use_cloud = asr_backend in ("volcengine", "cloud")
 
-    _wakeup_method = wakeup_method
+    # VAD 存在时用 VAD 的状态行为（idle/active），否则用热键行为（ready/recording）
+    _wakeup_method = "vad" if "vad" in methods else "hotkey"
 
     # 1. EventBus — 清除旧订阅，重新注册
     bus.clear()
@@ -395,6 +514,7 @@ def _assemble(config: dict) -> None:
     bus.on("done", _on_bus_done)
     bus.on("start", _on_bus_start)
     bus.on("config_changed", _on_config_changed)
+    bus.on("command", _on_bus_command)
 
     # 2. AudioCapture（共享）
     audio_cfg = config.get("audio", {})
@@ -404,24 +524,36 @@ def _assemble(config: dict) -> None:
         device=audio_cfg.get("device"),
     )
 
-    # 3. 唤醒模块（先创建，VAD 模式下转录模块需要它的 forward_queue）
+    # 3. 唤醒模块（可同时启动多个）
+    _wakeups = []
     frame_source = None  # 帧来源队列：None = 直接读 audio.queue
-    if wakeup_method == "vad":
+
+    if "vad" in methods:
         from shokztype.web.services.wakeup_vad_kws import VadKwsWakeup
-        _wakeup = VadKwsWakeup(bus, _audio, config)
-        frame_source = _wakeup.forward_queue
-        print("[assemble] 唤醒模块: VAD+KWS")
-    else:
+        try:
+            vad_wakeup = VadKwsWakeup(bus, _audio, config)
+            _wakeups.append(vad_wakeup)
+            frame_source = vad_wakeup.forward_queue
+        except (ValueError, FileNotFoundError) as e:
+            logger.warning("VAD 唤醒初始化失败（%s），降级为热键模式", e)
+
+    if "hotkey" in methods:
         from shokztype.web.services.wakeup_hotkey import HotkeyWakeup
-        combo = config.get("wakeup", {}).get("hotkey", {}).get("combo", "f2")
-        _wakeup = HotkeyWakeup(bus, _audio, combo)
-        print(f"[assemble] 唤醒模块: 热键 ({combo})")
+        combo = wakeup_cfg.get("hotkey", {}).get("combo", "f9")
+        _wakeups.append(HotkeyWakeup(bus, _audio, combo))
+
+    if not _wakeups:  # 兜底：默认热键
+        from shokztype.web.services.wakeup_hotkey import HotkeyWakeup
+        combo = wakeup_cfg.get("hotkey", {}).get("combo", "f9")
+        _wakeups.append(HotkeyWakeup(bus, _audio, combo))
+
+    print(f"[assemble] 唤醒模块: {'+'.join(methods)}")
 
     # 4. 声纹过滤（可选插入帧链路）
     vp_cfg = config.get("voiceprint", {})
     if vp_cfg.get("enabled") and vp_cfg.get("activeProfiles"):
         from shokztype.web.services.speaker_gate import SpeakerGate
-        # 热键模式且无 VadKwsWakeup：SpeakerGate 直接读 audio.queue，需管 audio 生命周期
+        # 纯热键模式下无 VadKwsWakeup：SpeakerGate 直接读 audio.queue，需管 audio 生命周期
         gate_reads_audio_directly = (frame_source is None)
         _speaker_gate = SpeakerGate(
             bus,
@@ -429,6 +561,10 @@ def _assemble(config: dict) -> None:
             audio=_audio if gate_reads_audio_directly else None,
         )
         transcriber_queue = _speaker_gate.output_queue
+        # 把 gate 注入 VadKwsWakeup，让结束词检测在声纹验证通过后才生效
+        for w in _wakeups:
+            if hasattr(w, "_speaker_gate"):
+                w._speaker_gate = _speaker_gate
         print("[assemble] 声纹过滤: 已插入帧链路")
     else:
         _speaker_gate = None
@@ -445,13 +581,48 @@ def _assemble(config: dict) -> None:
         _transcriber = BatchTranscriber(bus, _audio, config, input_queue=transcriber_queue)
         print("[assemble] 转录模块: 批量本地")
 
-    # 6. 启动
-    _wakeup.start()
+    # 6. 启动所有唤醒模块
+    for w in _wakeups:
+        w.start()
+
+    # 7. 全局撤销快捷键（独立于唤醒模式，始终生效）
+    _start_undo_hotkey(wakeup_cfg.get("undo_hotkey", "ctrl+shift+z"))
+
+
+def _start_undo_hotkey(combo: str) -> None:
+    global _undo_hotkey_listener
+    _stop_undo_hotkey()
+    try:
+        from pynput import keyboard as _kb
+        from shokztype.core.hotkeys import _normalize_combo
+        normalized = _normalize_combo(combo)
+        _undo_hotkey_listener = _kb.GlobalHotKeys({normalized: undo_last_output})
+        _undo_hotkey_listener.daemon = True
+        _undo_hotkey_listener.start()
+        logger.info("撤销快捷键已启动 (%s)", combo)
+    except Exception as e:
+        logger.warning("撤销快捷键启动失败: %s", e)
+
+
+def restart_undo_hotkey(combo: str) -> None:
+    """重新绑定撤销快捷键（供 wakeup router 在保存设置时调用）。"""
+    _start_undo_hotkey(combo)
+
+
+def _stop_undo_hotkey() -> None:
+    global _undo_hotkey_listener
+    if _undo_hotkey_listener is not None:
+        try:
+            _undo_hotkey_listener.stop()
+        except Exception:
+            pass
+        _undo_hotkey_listener = None
 
 
 def _teardown() -> None:
     """拆卸当前管线。"""
-    global _wakeup, _transcriber, _audio, _speaker_gate
+    global _wakeups, _transcriber, _audio, _speaker_gate
+    _stop_undo_hotkey()
 
     if _speaker_gate is not None:
         try:
@@ -460,12 +631,12 @@ def _teardown() -> None:
             pass
         _speaker_gate = None
 
-    if _wakeup is not None:
+    for w in _wakeups:
         try:
-            _wakeup.stop()
+            w.stop()
         except Exception:
             pass
-        _wakeup = None
+    _wakeups = []
 
     if _transcriber is not None:
         try:
@@ -489,17 +660,20 @@ def _teardown() -> None:
 # 生命周期 API
 # ---------------------------------------------------------------------------
 
-def init_worker() -> None:
+def init_worker(no_overlay: bool = False) -> None:
     """初始化管线。"""
-    global _ready, _init_error, _cached_fun_server
+    global _ready, _init_error, _cached_fun_server, _current_mode, _current_mode_name
 
-    _start_overlay()
-    import time
-    time.sleep(1.0 if getattr(sys, 'frozen', False) else 0.3)
+    if not no_overlay:
+        _start_overlay()
+        import time
+        time.sleep(1.0 if getattr(sys, 'frozen', False) else 0.3)
+        print("[init] overlay 已启动")
     _set_state("loading")
-    print("[init] overlay 已启动")
 
     config = get_config()
+    _current_mode = config.get("currentMode", "translate")
+    _current_mode_name = _resolve_mode_name(_current_mode)
     asr_backend = config.get("asr", {}).get("backend", "local")
     use_cloud = asr_backend in ("volcengine", "cloud")
 
@@ -597,7 +771,7 @@ def _on_config_changed(changes: dict) -> None:
     # 判断哪些模块需要重组
     device_changed = "device" in audio_changes and str(audio_changes["device"]) != str(_active_device_id)
     asr_changed = "backend" in asr_changes
-    wakeup_changed = "method" in wakeup_changes or "hotkey" in wakeup_changes or "end_keywords" in wakeup_changes or "keywords_file" in wakeup_changes
+    wakeup_changed = "method" in wakeup_changes or "methods" in wakeup_changes or "hotkey" in wakeup_changes or "end_keywords" in wakeup_changes or "keywords_file" in wakeup_changes
     voiceprint_changed = "voiceprint" in changes
 
     _set_state("saving")
@@ -611,9 +785,16 @@ def _on_config_changed(changes: dict) -> None:
     config = get_config()
 
     if voiceprint_changed:
-        # 声纹开关变更 → 帧链路需要重组（插入/移除 SpeakerGate）
-        logger.info("声纹配置变更 → 重组管线")
-        threading.Thread(target=restart_pipeline, daemon=True, name="ConfigRestart").start()
+        new_vp_enabled = changes.get("voiceprint", {}).get("enabled", True)
+        gate_active = _speaker_gate is not None
+        if gate_active == bool(new_vp_enabled):
+            # enabled 状态未变（仅 activeProfiles 变更），SpeakerGate 动态读 config，无需重组
+            logger.info("声纹 activeProfiles 变更，SpeakerGate 动态更新，无需重组管线")
+            _set_state("idle" if _wakeup_method == "vad" else "ready")
+        else:
+            # enabled 状态实际改变 → 帧链路需要重组（插入/移除 SpeakerGate）
+            logger.info("声纹 enabled 变更 → 重组管线")
+            threading.Thread(target=restart_pipeline, daemon=True, name="ConfigRestart").start()
     elif device_changed:
         _active_device_id = str(audio_changes["device"])
         logger.info("设备变更 → 重组管线")
@@ -646,13 +827,22 @@ def _swap_transcriber(config: dict) -> None:
 
     # 装新
     asr_backend = config.get("asr", {}).get("backend", "local")
+    # 还原 _assemble 中的帧链路：speaker_gate > vad forward_queue > None（热键模式）
+    if _speaker_gate is not None:
+        input_queue = _speaker_gate.output_queue
+    else:
+        input_queue = None
+        for w in _wakeups:
+            if hasattr(w, "forward_queue"):
+                input_queue = w.forward_queue
+                break
     if asr_backend in ("volcengine", "cloud"):
         from shokztype.web.services.transcriber_stream import StreamTranscriber
-        _transcriber = StreamTranscriber(bus, _audio, config)
+        _transcriber = StreamTranscriber(bus, _audio, config, input_queue=input_queue)
         logger.info("转录模块已切换: 流式云端 (%s)", asr_backend)
     else:
         from shokztype.web.services.transcriber_batch import BatchTranscriber
-        _transcriber = BatchTranscriber(bus, _audio, config)
+        _transcriber = BatchTranscriber(bus, _audio, config, input_queue=input_queue)
         logger.info("转录模块已切换: 批量本地")
 
     _set_state("idle" if _wakeup_method == "vad" else "ready")
@@ -666,6 +856,19 @@ def _swap_wakeup(config: dict) -> None:
 
 
 def restart_pipeline() -> dict:
+    global _ready, _init_error, _active_device_id
+    global _overlay_proc, _overlay_sock, _overlay_port
+
+    if not _restart_lock.acquire(blocking=False):
+        logger.warning("restart_pipeline 已在运行，跳过本次调用")
+        return {"success": False, "error": "restart in progress"}
+    try:
+        return _restart_pipeline_locked()
+    finally:
+        _restart_lock.release()
+
+
+def _restart_pipeline_locked() -> dict:
     global _ready, _init_error, _active_device_id
     global _overlay_proc, _overlay_sock, _overlay_port
 
@@ -690,7 +893,14 @@ def restart_pipeline() -> dict:
         return {"success": True, "method": _wakeup_method}
     except Exception as e:
         _init_error = str(e)
+        _set_state("error", str(e))
         print(f"[pipeline] 切换失败: {e}")
+        def _restore_after_error():
+            import time
+            time.sleep(4)
+            if _ui_state.get("status") == "error":
+                _set_state("ready")
+        threading.Thread(target=_restore_after_error, daemon=True).start()
         return {"success": False, "error": str(e)}
 
 

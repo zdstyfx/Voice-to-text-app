@@ -1,7 +1,17 @@
 n ǐ h ǎo x iǎo zh ù sh ǒu @你好小助手
+b āng w ǒ d ǎ k āi @帮我打开
 n ǐ h ǎo x iǎo sh áo @你好小韶
-t uì ch ū @退出
-q ǔ x iāo @取消
-z ài j iàn @再见
 j ié sh ù @结束
+t uì ch ū @退出
 w ǒ sh uō w án l e @我说完了
+b āng w ǒ ch è x iāo @帮我撤销
+h uàn h áng @换行
+àn h uí ch ē @按回车
+q ǐ d òng f ān y ì @启动翻译
+q ǐ d òng r ùn s è @启动润色
+q ǐ d òng zh uǎn x iě @启动转写
+ch è x iāo @撤销
+q ǐ d òng y óu j iàn @启动邮件
+q ǐ d òng j iū c uò @启动纠错
+q ǐ d òng w ú d í @启动无敌
+ào s à d ì @奥萨蒂

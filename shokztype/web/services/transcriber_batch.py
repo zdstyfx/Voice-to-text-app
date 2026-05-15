@@ -78,7 +78,10 @@ class BatchTranscriber:
         self._stop_event.set()
         if self._input_queue is None:
             self._audio.stop()
+        # join + 转写在后台执行，避免阻塞 EventBus 派发
+        threading.Thread(target=self._finish_stop, daemon=True, name="BatchStop").start()
 
+    def _finish_stop(self) -> None:
         if self._capture_thread and self._capture_thread.is_alive():
             self._capture_thread.join(timeout=3.0)
         self._capture_thread = None

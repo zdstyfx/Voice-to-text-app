@@ -19,15 +19,21 @@ async def restart_pipeline() -> dict:
     return recording_pipeline.restart_pipeline()
 
 
+@router.post("/api/recording/undo")
+async def undo_output() -> dict:
+    return recording_pipeline.undo_last_output()
+
+
 @router.get("/api/recording/stream")
 async def recording_stream():
     queue = await recording_pipeline.state_subscribe()
 
     async def event_gen():
         try:
-            # 先推一次当前状态
-            init = json.dumps(recording_pipeline.get_ui_state(), ensure_ascii=False)
-            yield f"data: {init}\n\n"
+            # 先推一次当前状态（补充 event 字段供前端识别）
+            ui = recording_pipeline.get_ui_state()
+            ui["event"] = "state"
+            yield f"data: {json.dumps(ui, ensure_ascii=False)}\n\n"
             while True:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=30)
@@ -39,4 +45,12 @@ async def recording_stream():
         finally:
             recording_pipeline.state_unsubscribe(queue)
 
-    return StreamingResponse(event_gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )

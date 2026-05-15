@@ -107,17 +107,23 @@ async def delete_profile(profile_id: str) -> dict:
 async def enroll_step(profile_id: str, step: int = 1, duration: float = 5.0) -> EnrollStepResponse:
     """后端录制麦克风音频并做声纹录入（与 ASR 同源，保证一致性）。"""
     import asyncio
-    from shokztype.web.services.recording_pipeline import _set_state
+    from shokztype.web.services.recording_pipeline import (
+        _set_state, set_enrollment_active, get_default_state,
+    )
 
-    _set_state("recording", f"声纹录制中... {duration:.0f}s")
+    set_enrollment_active(True)
+    try:
+        _set_state("recording", f"声纹录制中... {duration:.0f}s")
 
-    loop = asyncio.get_event_loop()
-    audio_data = await loop.run_in_executor(None, _record_from_mic, duration)
+        loop = asyncio.get_event_loop()
+        audio_data = await loop.run_in_executor(None, _record_from_mic, duration)
 
-    _set_state("processing", "声纹分析中...")
-    result = await voiceprint_manager.enroll_step(profile_id, step, audio_data)
+        _set_state("processing", "声纹分析中...")
+        result = await voiceprint_manager.enroll_step(profile_id, step, audio_data)
+    finally:
+        set_enrollment_active(False)
+        _set_state(get_default_state())
 
-    _set_state("ready")
     return EnrollStepResponse(**result)
 
 

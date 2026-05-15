@@ -44,6 +44,17 @@ class StreamTranscriber:
     # --- 事件处理 ---
 
     def _on_start(self, _: Any) -> None:
+        # 如果上一个 session 有未提交的结果，先异步提交，避免结果丢失
+        prev_text = self._final_text.strip()
+        prev_done = self._done_emitted.is_set()
+        if prev_text and not prev_done:
+            logger.info("新 session 开始，提交上一 session 未完成结果: %s", prev_text[:80])
+            prev_bus = self._bus
+            def _flush():
+                prev_bus.emit("result", prev_text)
+                prev_bus.emit("done")
+            threading.Thread(target=_flush, daemon=True, name="PrevSessionFlush").start()
+
         self._session_id = next(self._session_counter)
         sid = self._session_id
         self._final_text = ""
