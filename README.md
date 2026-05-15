@@ -1,146 +1,111 @@
-# ShokzType — Voice to Text Desktop App
+# ShokzType 🎙️
 
-> Chinese voice recognition app that listens, transcribes, and types directly into any window.  
-> 中文语音识别桌面应用，实时转写并自动输入到任意窗口。
+**说话，它来打字。**  
+**Speak. It types for you.**
 
----
-
-## Features / 功能特性
-
-| | English | 中文 |
-|---|---|---|
-| 🎙️ | Local ASR (offline, no data sent) | 本地离线识别，数据不出本机 |
-| ☁️ | Cloud ASR (DashScope / VolcEngine) | 支持阿里云、火山云端识别 |
-| ⌨️ | Auto-type result into active window | 自动将结果输入到当前窗口 |
-| 🔑 | Hotkey or VAD+Keyword wakeup | 快捷键 / 声纹+关键词唤醒 |
-| 👤 | Speaker voiceprint filtering | 声纹识别，只响应指定说话人 |
-| 🤖 | Optional LLM post-processing | 可接大模型对识别结果润色 |
-| 🖥️ | Windows & macOS desktop app | 支持 Windows / macOS |
+对着麦克风说话，文字自动出现在你正在使用的任何窗口里——聊天框、文档、搜索栏，都行。  
+Speak into your mic, and the text appears in whatever window you're using — chat, docs, search bars, anything.
 
 ---
 
-## Quick Start / 快速开始
+## 它能做什么 / What it does
 
-### Prerequisites / 环境要求
+- **一键开录** — 按下快捷键开始说话，松开自动识别并输入  
+  **One-key recording** — press a hotkey to start, release to transcribe and type
 
-- Python 3.10+
-- Windows 10/11 or macOS 12+
+- **离线可用** — 本地模型，说的话不会上传到任何服务器  
+  **Works offline** — local model, your voice never leaves your machine
 
-### Install / 安装
+- **也支持云端** — 想要更高精度，可以接阿里云 / 火山引擎  
+  **Cloud option too** — connect DashScope or VolcEngine for higher accuracy
+
+- **认识你的声音** — 声纹功能，只响应你的声音，别人说话不触发  
+  **Knows your voice** — voiceprint filter so only your voice triggers it
+
+- **自动唤醒** — 不想按键？说关键词自动开始录音  
+  **Auto wakeup** — say a keyword to start recording, no hands needed
+
+- **AI 润色** — 可选接入大模型，自动整理口语表达  
+  **AI polish** — optionally connect an LLM to clean up spoken language
+
+---
+
+## 快速上手 / Getting Started
+
+### 第一步：安装 / Step 1 — Install
 
 ```bash
 git clone https://github.com/zdstyfx/Voice-to-text-app.git
 cd Voice-to-text-app
-
 pip install -r requirements.txt
+```
 
+### 第二步：配置 / Step 2 — Configure
+
+```bash
 cp config.json.example config.json
 ```
 
-### Run / 运行
+用记事本打开 `config.json`，填入你的 API Key（如果使用云端识别的话）。  
+Open `config.json` and fill in your API key if you want cloud recognition.
+
+### 第三步：启动 / Step 3 — Run
 
 ```bash
-# Desktop window mode (default) / 桌面窗口模式（默认）
 python -m shokztype
-
-# HTTP server only, no window / 仅启动服务，不弹窗口
-python -m shokztype --no-window
-
-# Custom port / 自定义端口
-python -m shokztype --port 9000
 ```
 
-Open `http://localhost:8000` in your browser if running without a window.  
-无窗口模式下，在浏览器打开 `http://localhost:8000`。
+程序启动后会弹出一个窗口，直接在界面里操作就行。  
+A window will pop up — everything can be controlled from there.
 
 ---
 
-## Configuration / 配置
+## 第一次运行说明 / First Run Note
 
-Edit `config.json` after copying from the example:  
-从示例复制后编辑 `config.json`：
+首次启动会自动下载本地识别模型，共约 **500MB**，需要等几分钟，下载完成后后续启动秒开。  
+On first launch, local models (~500MB total) will download automatically. This takes a few minutes once, then it's instant every time after.
 
-```json
-{
-  "asr": {
-    "backend": "local"
-  },
-  "cloud_asr": {
-    "provider": "dashscope",
-    "api_key": "your-api-key-here"
-  }
-}
-```
-
-| Field / 字段 | Values / 可选值 | Description / 说明 |
-|---|---|---|
-| `asr.backend` | `local` / `cloud` | Local FunASR or cloud / 本地或云端 |
-| `cloud_asr.provider` | `dashscope` / `volcengine` | Cloud provider / 云端服务商 |
-| `cloud_asr.api_key` | string | Your API key / 你的 API Key |
+也可以在设置页面手动触发下载。  
+You can also trigger the download manually from the Settings page.
 
 ---
 
-## Architecture / 架构
+## 系统要求 / Requirements
 
-```
-shokztype/
-├── core/          # Audio pipeline: VAD, ASR, speaker, KWS, output
-│                  # 音频管线：VAD、识别、声纹、关键词、输出
-├── web/           # FastAPI backend + React frontend
-│                  # FastAPI 后端 + React 前端
-│   ├── routers/   # REST / SSE API endpoints
-│   ├── services/  # Pipeline orchestration
-│   └── static/    # Built frontend (served directly)
-├── desktop/       # NiceGUI alternative UI
-└── __main__.py    # Entry point / 入口
-```
-
-**Pipeline flow / 管线流程:**
-
-```
-Wakeup (hotkey / VAD+KWS)
-    → Transcriber (local FunASR / cloud ASR)
-        → [optional] SpeakerGate (voiceprint filter)
-            → [optional] LLM post-process
-                → type_text() → active window
-```
+| | |
+|---|---|
+| 系统 / OS | Windows 10/11 or macOS 12+ |
+| Python | 3.10 或以上 / 3.10 or above |
+| 麦克风 / Mic | 任意输入设备 / Any input device |
 
 ---
 
-## Local ASR Models / 本地模型
+## 常见问题 / FAQ
 
-On first run, models are downloaded automatically (~500MB total):  
-首次运行会自动下载模型（共约 500MB）：
+**Q: 识别很慢怎么办？**  
+A: 默认用本地模型跑在 CPU 上，速度一般。可以在设置里切换到云端识别，速度快很多。
 
-| Model | Size | Purpose |
-|---|---|---|
-| FunASR Paraformer | ~400MB | Speech recognition / 语音识别 |
-| CAM++ | ~27MB | Speaker verification / 声纹验证 |
-| FireRedVAD | ~10MB | Voice activity detection / 语音检测 |
-
-You can also trigger download from the Settings page in the UI.  
-也可以在 UI 设置页面手动触发下载。
+**Q: Why is recognition slow?**  
+A: The default local model runs on CPU. Switch to cloud recognition in Settings for much faster results.
 
 ---
 
-## Packaging / 打包
+**Q: macOS 提示没有辅助功能权限？**  
+A: 前往「系统设置 → 隐私与安全性 → 辅助功能」，把终端或应用加进去。
 
-Build a standalone executable with PyInstaller:  
-使用 PyInstaller 打包为独立可执行文件：
-
-```bash
-# Windows
-packaging/build.bat
-
-# macOS
-bash packaging/build.sh
-```
-
-Output: `packaging/dist/ShokzType/`  
-Windows installer (Inno Setup): `packaging/dist/ShokzType_Setup_v0.1.0.exe`
+**Q: macOS says it needs accessibility permission?**  
+A: Go to System Settings → Privacy & Security → Accessibility, and add the terminal or app.
 
 ---
 
-## License / 许可
+**Q: 我不想联网，可以纯离线用吗？**  
+A: 可以。`config.json` 里把 `asr.backend` 设为 `local`，模型下载完之后完全离线运行。
+
+**Q: Can I use it fully offline?**  
+A: Yes. Set `asr.backend` to `local` in `config.json`. Once models are downloaded, no internet needed.
+
+---
+
+## License
 
 [MIT](LICENSE)
